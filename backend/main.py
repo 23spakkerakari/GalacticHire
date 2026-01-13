@@ -20,8 +20,8 @@ import numpy as np
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import pdfplumber  # Add this import for PDF text extraction
 import requests as httpx
+import pdfplumber
 
 # Load environment variables
 load_dotenv()
@@ -372,7 +372,7 @@ async def analyze_video_endpoint(video: VideoURL):
         print(f"Error in endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def generate_personalized_questions_from_resume(resume_text: str, num_questions: int = 3) -> list:
+def generate_personalized_questions_from_resume(resume_text: str, job_description: str, num_questions: int = 3) -> list:
     """
     Generate a list of personalized interview questions based on the resume text using OpenAI Chat API (gpt-4o).
     Returns a list of dicts: [{"question": ...}], suitable for frontend use.
@@ -380,10 +380,12 @@ def generate_personalized_questions_from_resume(resume_text: str, num_questions:
     import re
     import json
     prompt = (
-        f"Given the following resume, generate {num_questions} personalized interview questions "
-        "that are specific to the candidate's background, experience, and skills. "
+        f"Given the following resume, generate {num_questions} hypter-specific interview questions "
+        "based on your own knowledge of the title, the bullet points, and the company. \n"
+        "The questions should be relevant to the job descrption, and company values"
         "Questions should be concise, relevant, and not generic.\n\n"
         f"Resume:\n{resume_text}\n\n"
+        f"Job Description:\n{job_description}\n\n"
         f"Return the questions as a JSON array of objects, each with a 'question' field. Example: [{{\"question\": \"...\"}}, ...]"
     )
     response = client.chat.completions.create(
@@ -467,8 +469,10 @@ async def generate_resume_questions_from_db(request: ResumeQuestionsRequest):
         if not text.strip():
             return {"error": "Could not extract text from the PDF."}
         
+
         # 4. Generate questions using the new function
-        questions = generate_personalized_questions_from_resume(text, num_questions=3)
+        job_description = supabase.table('job_descriptions').select('description').eq('recruiter_id', user_id).execute()
+        questions = generate_personalized_questions_from_resume(text, job_description[0]['description'], num_questions=3)
         if not questions:
             return {"error": "No questions could be generated from the resume."}
         

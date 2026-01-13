@@ -413,7 +413,7 @@ const CommunicationAssessment: React.FC<{
 };
 
 // Demo Component
-export default function App() {
+export function VideoAnalysisDemo() {
   const mockVideo: Video = {
     title: "Senior Software Engineer Interview",
     url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
@@ -482,3 +482,4 @@ export default function App() {
     />
   );
 }
+export default VideoAnalysis;

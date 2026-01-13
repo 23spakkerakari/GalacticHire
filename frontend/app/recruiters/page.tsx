@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/utils/auth";
 import { useRecruiterProfile } from "./hooks/useRecruiterProfile";
 import { RecruiterProfileForm } from "./components/RecruiterProfileForm";
@@ -24,11 +24,32 @@ const supabase = createClient();
 
 export default function RecruitersPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const interviewIdParam = searchParams.get("interview") || null;
+
 
   useEffect(() => {
     router.prefetch("/");
     router.prefetch("/recruiters/login");
   }, [router]);
+
+  useEffect(() => {
+    const loadUserAndInterview = async () => {
+      try {
+        const {data : user, error: userError} = await supabase.auth.getUser();
+        if (userError || !user) {
+          console.error("Error getting user:", userError);
+          return;
+        }
+        setCurrentUserId(user.user.id);
+        console.log("Current user ID:", currentUserId);
+        const {data : interview, error: interviewError} = await supabase.from("interview").select("id").contains("recruiter_id", [currentUserId]).order("created_at", {ascending: false})
+      } catch (error) {
+        console.error("Error loading user and interview:", error);
+        return;
+      }
+    } 
+  }, []);
 
   const { isLoading, showProfileForm, profileData, userEmail, updateProfile } =
     useRecruiterProfile();
@@ -41,92 +62,138 @@ export default function RecruitersPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [selectedAnswers, setSelectedAnswers] = useState<InterviewAnswer[]>([]);
-  const [selectedAnswer, setSelectedAnswer] = useState<InterviewAnswer | null>(
-    null
-  );
+  const [selectedAnswer, setSelectedAnswer] = useState<InterviewAnswer | null>(null);
   const [isPending, startTransition] = useTransition();
   const [newInterviewOpen, setNewInterviewOpen] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string>("");
-  const { analysis, isAnalyzing, analyzeVideo, analyzeAnswer } =
-    useVideoAnalysis();
-  console.log("analysis in recruiters page from useVideoAnalysis", analysis);
-  const INVITE_API = `${getBackendUrl()}/invite`;
+  const { analysis, isAnalyzing, analyzeVideo, analyzeAnswer } = useVideoAnalysis();
+const [currentInterviewId, setCurrentInterviewId] = useState<string>("");
 
-  const sendInvite = async () => {
-    if (!inviteEmail.trim()) return;
-    setInviteMessage(null);
-    try {
-      const res = await fetch(INVITE_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: inviteEmail.replace(/[\r\n]/g, "").trim(),
-        }),
-      });
-
-      if (!res.ok) {
-        const { detail } = await res.json();
-        throw new Error(detail || "Failed to send invite");
-      }
-
-      const data = await res.json();
-
-      if (data.success) {
-        setInviteMessage(data.message || "Invite sent successfully! 🎉");
-        setInviteEmail("");
-      } else {
-        throw new Error(data.message || "Failed to send invite");
-      }
-    } catch (err: any) {
-      console.error(err);
-      setInviteMessage(err.message ?? "Error sending invite");
+const sendInvite = async () => {
+  console.log("currentInterviewId: ", currentInterviewId);
+  if (!inviteEmail.trim()) return;
+  setInviteMessage(null);
+  try {
+    // Get an invite code to include in the email.
+    // Use the most recent interview's invite_code for this recruiter.
+    if (!currentUserId) {
+      setInviteMessage("Unable to determine recruiter. Please log in again.");
+      return;
     }
-  };
 
-  const handleLogout = async () => {
-    supabase.auth.signOut().catch(() => {});
-    startTransition(() => {
-      router.push("/recruiters/login");
+    if (!currentInterviewId) {
+      setInviteMessage("No interview selected. Create a new interview first.");
+      return;
+    }
+    
+
+    const { data: interviewRow, error: interviewError } = await supabase
+      .from("interview")
+      .select("id, invite_code")
+      .eq("recruiter_id", currentUserId)
+      .eq("id", currentInterviewId)
+      .single();
+
+    if (interviewError || !interviewRow) {
+      setInviteMessage("Could not load interview. Please try again.");
+      return;
+    }
+
+    const inviteCodeStr = interviewRow.invite_code as string | undefined;
+    if (!inviteCodeStr) {
+      setInviteMessage("Interview is missing an invite code.");
+      return;
+    }
+
+    const payload = {
+      email: inviteEmail.replace(/[\r\n]/g, "").trim(),
+      invite_code: inviteCodeStr,
+      interview_title: "Interview Invitation",
+      recruiter_name: profileData?.full_name || "HireVision Recruiter",
+    };
+
+    const res = await fetch(`${getBackendUrl()}/send-interview-invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-  };
 
-  const handleVideoSelect = async (video: Video) => {
-    setSelectedVideo(video);
-
-    // Find all answers for this candidate in the candidateInterviews array
-    const candidateId = video.id;
-    const candidateInterview = candidateInterviews.find(
-      (interview) => interview.candidate_id === candidateId
-    );
-
-    if (candidateInterview && candidateInterview.answers.length > 0) {
-      // We have interview answers for this candidate
-      setSelectedAnswers(candidateInterview.answers);
-
-      // Set the first answer as the selected one and analyze it
-      const firstAnswer = candidateInterview.answers[0];
-      console.log("firstAnswer in recruiters page", firstAnswer);
-      setSelectedAnswer(firstAnswer);
-      await analyzeAnswer(firstAnswer);
-    } else {
-      // Fall back to the legacy behavior - analyze the video directly
-      setSelectedAnswers([]);
-      setSelectedAnswer(null);
-      await analyzeVideo(video);
+    if (!res.ok) {
+      let errorMessage = "Failed to send invite";
+      try {
+        const errorBody = await res.json();
+        const detail = errorBody?.detail ?? errorBody?.message ?? errorBody?.error;
+        if (Array.isArray(detail)) {
+          errorMessage = detail
+            .map((d) => d?.msg || d?.message || (Array.isArray(d?.loc) ? `${d.loc.join(".")}: invalid` : "Invalid input"))
+            .join("; ");
+        } else if (typeof detail === "string") {
+          errorMessage = detail;
+        } else if (detail && typeof detail === "object") {
+          errorMessage = JSON.stringify(detail);
+        }
+      } catch {}
+      throw new Error(errorMessage);
     }
-  };
 
-  // New function to handle selection of specific answer
-  const handleAnswerSelect = async (answer: InterviewAnswer) => {
-    setSelectedAnswer(answer);
-    await analyzeAnswer(answer);
-  };
+    const data = await res.json();
 
-  const handleCloseAnalysis = () => {
-    setSelectedVideo(null);
+    if (data.success) {
+      setInviteMessage(data.message || "Invite sent successfully! 🎉");
+      setInviteEmail("");
+    } else {
+      throw new Error(data.message || "Failed to send invite");
+    }
+  } catch (err: any) {
+    console.error(err);
+    setInviteMessage(err.message ?? "Error sending invite");
+  }
+};
+
+const handleLogout = async () => {
+  supabase.auth.signOut().catch(() => {});
+  startTransition(() => {
+    router.push("/recruiters/login");
+  });
+};
+
+const handleVideoSelect = async (video: Video) => {
+  setSelectedVideo(video);
+
+  // Find all answers for this candidate in the candidateInterviews array
+  const candidateId = video.id;
+  const candidateInterview = candidateInterviews.find(
+    (interview) => interview.candidate_id === candidateId
+  );
+
+  if (candidateInterview && candidateInterview.answers.length > 0) {
+    // We have interview answers for this candidate
+    setSelectedAnswers(candidateInterview.answers);
+
+    // Set the first answer as the selected one and analyze it
+    const firstAnswer = candidateInterview.answers[0];
+    setSelectedAnswer(firstAnswer);
+    await analyzeAnswer(firstAnswer);
+  } else {
+    // Fall back to the legacy behavior - analyze the video directly
     setSelectedAnswers([]);
     setSelectedAnswer(null);
-  };
+    await analyzeVideo(video);
+  }
+};
+
+  // New function to handle selection of specific answer
+const handleAnswerSelect = (answer: any) => {
+  const casted = answer as unknown as InterviewAnswer;
+  setSelectedAnswer(casted);
+  analyzeAnswer(casted);
+};
+
+const handleCloseAnalysis = () => {
+  setSelectedVideo(null);
+  setSelectedAnswers([]);
+  setSelectedAnswer(null);
+};
 
   useEffect(() => {
     const fetchCandidateInterviews = async () => {
@@ -155,10 +222,14 @@ export default function RecruitersPage() {
         }
 
         // Now attempt to get interview_answers
-        const { data: allAnswers, error: answersError } = await supabase
+        let answersCheckQuery = supabase
           .from("interview_answers")
           .select("*")
           .limit(1);
+        if (interviewIdParam) {
+          answersCheckQuery = answersCheckQuery.eq("interview_id", interviewIdParam);
+        }
+        const { data: allAnswers, error: answersError } = await answersCheckQuery;
 
         if (answersError) {
           console.error(
@@ -174,20 +245,31 @@ export default function RecruitersPage() {
         console.log("Raw response from interview_answers table:", allAnswers);
 
         if (!allAnswers || allAnswers.length === 0) {
-          console.log(
-            "No interview answers found, falling back to legacy method"
-          );
-          fetchLegacyVideos();
-          return;
+          if (!interviewIdParam) {
+            console.log(
+              "No interview answers found, falling back to legacy method"
+            );
+            fetchLegacyVideos();
+            return;
+          } else {
+            // When filtering by a specific interview, don't fallback; show empty
+            setCandidateInterviews([]);
+            setLegacyVideos([]);
+            return;
+          }
         }
 
         console.log("Successfully found interview answers table with data");
 
         // Fetch all distinct user_ids who have interview answers
-        const { data: userIdData, error: userIdError } = await supabase
+        let userIdsQuery = supabase
           .from("interview_answers")
           .select("user_id")
           .limit(100);
+        if (interviewIdParam) {
+          userIdsQuery = userIdsQuery.eq("interview_id", interviewIdParam);
+        }
+        const { data: userIdData, error: userIdError } = await userIdsQuery;
 
         if (userIdError) {
           console.error("Error fetching user IDs:", userIdError);
@@ -204,10 +286,16 @@ export default function RecruitersPage() {
         );
 
         if (uniqueUserIds.length === 0) {
-          console.log(
-            "No unique candidate IDs found, falling back to legacy method"
-          );
-          fetchLegacyVideos();
+          if (!interviewIdParam) {
+            console.log(
+              "No unique candidate IDs found, falling back to legacy method"
+            );
+            fetchLegacyVideos();
+          } else {
+            // When filtering by a specific interview, it's fine to be empty
+            setCandidateInterviews([]);
+            setLegacyVideos([]);
+          }
           return;
         }
 
@@ -219,8 +307,13 @@ export default function RecruitersPage() {
 
         if (candidatesError || !candidates || candidates.length === 0) {
           console.error("Error fetching candidate profiles:", candidatesError);
-          console.log("Falling back to legacy method due to profiles error");
-          fetchLegacyVideos();
+          if (!interviewIdParam) {
+            console.log("Falling back to legacy method due to profiles error");
+            fetchLegacyVideos();
+          } else {
+            setCandidateInterviews([]);
+            setLegacyVideos([]);
+          }
           return;
         }
 
@@ -231,11 +324,15 @@ export default function RecruitersPage() {
         const videoObjects: Video[] = [];
 
         for (const candidate of candidates) {
-          const { data: answers, error: answersError } = await supabase
+          let answersQuery = supabase
             .from("interview_answers")
             .select("*")
             .eq("user_id", candidate.id)
             .order("created_at", { ascending: false });
+          if (interviewIdParam) {
+            answersQuery = answersQuery.eq("interview_id", interviewIdParam);
+          }
+          const { data: answers, error: answersError } = await answersQuery;
 
           if (answersError || !answers || answers.length === 0) {
             console.log(
@@ -362,7 +459,7 @@ export default function RecruitersPage() {
     };
 
     fetchCandidateInterviews();
-  }, []);
+  }, [interviewIdParam]);
 
   // Get current user ID
   useEffect(() => {
@@ -374,6 +471,27 @@ export default function RecruitersPage() {
     };
     getUser();
   }, []);
+
+  useEffect(() => {
+    const fetchLatestInterviewId = async () => {
+      if (!currentUserId) return;
+      try {
+        const { data, error } = await supabase
+          .from("interview")
+          .select("id")
+          .eq("recruiter_id", currentUserId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+        if (!error && data?.id) {
+          setCurrentInterviewId(data.id);
+        }
+      } catch {}
+    };
+    if (!currentInterviewId) {
+      fetchLatestInterviewId();
+    }
+  }, [currentUserId, currentInterviewId]);
 
   // Show loading state while profile data is being fetched
   if (isLoading) {
@@ -440,7 +558,7 @@ export default function RecruitersPage() {
                 }}
                 className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm"
               >
-                Cancel
+                Close
               </button>
               <button
                 onClick={sendInvite}
@@ -458,6 +576,9 @@ export default function RecruitersPage() {
           onClose={() => setNewInterviewOpen(false)}
           recruiterId={currentUserId}
           companyNumber={profileData?.company_number || ""}
+          onCreated = {(interview) => {
+            setCurrentInterviewId(interview.id);
+          }}
         />
       )}
 
@@ -478,7 +599,7 @@ export default function RecruitersPage() {
             onVideoSelect={handleVideoSelect}
             onOpenInvite={() => setInviteOpen(true)}
             onNewInterview={() => setNewInterviewOpen(true)}
-            onBackClick={() => router.push("/")}
+            onBackClick={() => router.push("/recruiter-dashboard")}
             recruiterName={profileData?.full_name}
             recruiterEmail={userEmail || undefined}
             recruiterId={currentUserId || undefined}

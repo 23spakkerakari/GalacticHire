@@ -24,9 +24,10 @@ interface NewInterviewProps {
   onClose: () => void;
   recruiterId: string;
   companyNumber: string;
+  onCreated: (interview: { id: string }) => void;
 }
 
-export default function NewInterview({ onClose, recruiterId, companyNumber }: NewInterviewProps) {
+export default function NewInterview({ onClose, recruiterId, companyNumber, onCreated }: NewInterviewProps) {
   const [step, setStep] = useState<"questions" | "invite" | "review">("questions");
   const [questions, setQuestions] = useState<InterviewQuestion[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
@@ -138,14 +139,15 @@ export default function NewInterview({ onClose, recruiterId, companyNumber }: Ne
         return;
       }
 
+      // Notify parent about created interview (expose id)
+      onCreated({ id: interview.id });
+
       // Insert questions (use order_index)
       const questionsToInsert = questions.map(q => ({
         interview_id: interview.id,
         question: q.question,
         order_index: q.order,
       }));
-
-      console.log("Inserting questions:", questionsToInsert);
 
       const { error: questionsError } = await supabase
         .from("interview_questions")

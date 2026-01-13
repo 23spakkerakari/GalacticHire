@@ -139,7 +139,7 @@ export default function ProfilePage() {
 
       // On successful profile save, redirect to /candidates/upload-resume
       // Show progress UI: Step 1 of 3
-      router.push("/candidates/upload-resume");
+      router.push("/candidates/upload-resume"); 
     } catch (error) {
       console.error(
         "Error updating profile:",

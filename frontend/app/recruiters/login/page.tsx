@@ -44,7 +44,8 @@ export default function RecruiterLoginPage() {
           "You are not authorized as a recruiter. Please sign in as a candidate instead."
         );
       } else {
-        router.push("/recruiters");
+        // router.push("/recruiters");
+        router.push("/recruiter-dashboard");
         router.refresh(); // Force refresh to update session
       }
     } catch (err) {

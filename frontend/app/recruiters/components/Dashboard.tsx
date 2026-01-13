@@ -264,7 +264,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     setIsChatLoading(true);
     setChatReply(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+      // process.env.NEXT_PUBLIC_BACKEND_URL ||
+      const baseUrl = "http://localhost:8000";
       const res = await fetch(`${baseUrl}/recruiter-chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -289,7 +290,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       <div className="w-full bg-gradient-to-r from-gray-900/60 to-gray-800/40 backdrop-blur border border-gray-700/60 rounded-xl mb-6 shadow-lg">
         <div className="max-w-7xl mx-auto h-16 px-4 md:px-6 flex items-center justify-end gap-5">
           <Link
-            href="/"
+            href="/recruiter-dashboard"
             prefetch
             className="px-6 py-2.5 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-full transition-transform duration-200 transform hover:-translate-y-0.5 shadow-sm hover:shadow-md text-base flex items-center min-w-48 ring-1 ring-gray-500/20 hover:ring-gray-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
           >
@@ -326,6 +327,22 @@ const Dashboard: React.FC<DashboardProps> = ({
               />
             </svg>
             New Interview
+          </button>
+          <button
+            onClick={onOpenInvite}
+            className="px-6 py-2.5 bg-gradient-to-r from-emerald-600/25 to-teal-600/25 hover:from-emerald-600/35 hover:to-teal-600/35 text-emerald-200 rounded-full transition-transform duration-200 transform hover:-translate-y-0.5 shadow-sm hover:shadow-md text-base flex items-center min-w-48 ring-1 ring-emerald-400/20 hover:ring-emerald-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 mr-2"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path d="M12 2a5 5 0 110 10 5 5 0 010-10z" />
+              <path d="M2 20a8 8 0 0116 0v1H2v-1z" />
+              <path d="M19 10a1 1 0 00-1 1v2h-2a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2v-2a1 1 0 00-1-1z" />
+            </svg>
+            Invite Candidate
           </button>
           <button
             onClick={handleLogout}

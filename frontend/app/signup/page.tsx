@@ -84,7 +84,7 @@ export default function SignUpPage() {
           if (interviewCode) {
             router.push(`/candidates/dashboard?code=${interviewCode}`);
           } else {
-            router.push("/candidates/upload-resume");
+            router.push("/candidates/upload-resume"); 
           }
         }
       } catch (err) {

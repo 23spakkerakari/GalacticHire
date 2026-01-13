@@ -62,6 +62,10 @@ export async function middleware(request: NextRequest) {
     if (request.nextUrl.pathname.startsWith('/companies')) {
       return NextResponse.redirect(new URL('/companies/login', request.url))
     }
+
+    if (request.nextUrl.pathname.startsWith('/recruiter-dashboard')) {
+      return NextResponse.redirect(new URL('/recruiters/login', request.url))
+    }
   } else {
     const user = session.user
     const roles = user?.user_metadata?.app_metadata?.roles || []
@@ -90,7 +94,7 @@ export async function middleware(request: NextRequest) {
     }
 
     // If a candidate tries to access recruiter routes, show role switch prompt
-    if (!isRecruiter && !isCompanyAdmin && request.nextUrl.pathname.startsWith('/recruiters')) {
+    if (!isRecruiter && !isCompanyAdmin && (request.nextUrl.pathname.startsWith('/recruiters') || request.nextUrl.pathname.startsWith('/recruiter-dashboard'))) {
       // Check if user is already getting redirected to avoid loops
       if (request.nextUrl.searchParams.has('role-switch')) {
         return NextResponse.next()
@@ -124,7 +128,7 @@ export async function middleware(request: NextRequest) {
     }
     
     // If a company admin tries to access recruiter routes, show role switch prompt
-    if (isCompanyAdmin && request.nextUrl.pathname.startsWith('/recruiters')) {
+    if (isCompanyAdmin && (request.nextUrl.pathname.startsWith('/recruiters') || request.nextUrl.pathname.startsWith('/recruiter-dashboard'))) {
       // Check if user is already getting redirected to avoid loops
       if (request.nextUrl.searchParams.has('role-switch')) {
         return NextResponse.next()
@@ -162,6 +166,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/candidates/:path*', '/recruiters/:path*', '/companies/:path*']
+  matcher: ['/candidates/:path*', '/recruiters/:path*', '/companies/:path*', '/recruiter-dashboard']
 }
 
