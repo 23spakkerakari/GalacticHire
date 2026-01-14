@@ -15,7 +15,7 @@ interface InterviewQuestion {
 interface CandidateInvite {
   id: string;
   email: string;
-  invite_code: string;
+  invite_code: number;
   status: "pending" | "accepted" | "completed";
   created_at: string;
 }
@@ -162,7 +162,7 @@ export default function NewInterview({ onClose, recruiterId, companyNumber, onCr
 
       // Send invites to candidates (each with their own invite_code)
       const invitePromises = inviteEmails.map(async (email) => {
-        const candidateInviteCode = generateInviteCode().toString();
+        const candidateInviteCode = generateInviteCode();
         
         console.log(`🔍 Checking for existing invite for email: ${email} and interview: ${interview.id}`);
         

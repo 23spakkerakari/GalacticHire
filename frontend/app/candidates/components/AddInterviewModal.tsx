@@ -33,14 +33,30 @@ export default function AddInterviewModal({ onClose, onSuccess, initialCode }: A
         return;
       }
 
-      console.log(`🔍 [ADD_INTERVIEW] Checking invite code: ${inviteCode.trim()}`);
+      const trimmedCode = inviteCode.trim();
+      const numericCode = Number(trimmedCode);
+      const primaryCode = Number.isFinite(numericCode) ? numericCode : trimmedCode;
+
+      console.log(`🔍 [ADD_INTERVIEW] Checking invite code: ${trimmedCode}`);
 
       // Check if the invite code exists and is valid
-      const { data: invite, error: inviteError } = await supabase
+      let { data: invite, error: inviteError } = await supabase
         .from("interview_invites")
         .select("*, interview(*)")
-        .eq("invite_code", inviteCode.trim())
+        .eq("invite_code", primaryCode)
         .single();
+
+      // Fallback for any legacy string-stored codes or leading-zero scenarios
+      if ((inviteError || !invite) && Number.isFinite(numericCode)) {
+        const secondTry = await supabase
+          .from("interview_invites")
+          .select("*, interview(*)")
+          .eq("invite_code", trimmedCode)
+          .single();
+
+        invite = secondTry.data;
+        inviteError = secondTry.error;
+      }
 
       console.log("🔍 Debug - Invite Code:", inviteCode.trim());
       console.log("🔍 Debug - Invite Data:", invite);

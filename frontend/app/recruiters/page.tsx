@@ -99,18 +99,25 @@ const sendInvite = async () => {
       return;
     }
 
-    const inviteCodeStr = interviewRow.invite_code as string | undefined;
-    if (!inviteCodeStr) {
-      setInviteMessage("Interview is missing an invite code.");
+    // Prefer numeric invite codes; gracefully handle legacy string values
+    const inviteCode =
+      typeof interviewRow.invite_code === "number"
+        ? interviewRow.invite_code
+        : Number(String(interviewRow.invite_code ?? "").trim());
+
+    if (!Number.isFinite(inviteCode)) {
+      setInviteMessage("Interview is missing a valid invite code.");
       return;
     }
 
     const payload = {
       email: inviteEmail.replace(/[\r\n]/g, "").trim(),
-      invite_code: inviteCodeStr,
+      invite_code: inviteCode,
       interview_title: "Interview Invitation",
       recruiter_name: profileData?.full_name || "HireVision Recruiter",
     };
+
+    console.log("payload: ", payload);
 
     const res = await fetch(`${getBackendUrl()}/send-interview-invite`, {
       method: "POST",
@@ -128,6 +135,7 @@ const sendInvite = async () => {
             .map((d) => d?.msg || d?.message || (Array.isArray(d?.loc) ? `${d.loc.join(".")}: invalid` : "Invalid input"))
             .join("; ");
         } else if (typeof detail === "string") {
+          console.log("errorMessage: ", errorMessage);
           errorMessage = detail;
         } else if (detail && typeof detail === "object") {
           errorMessage = JSON.stringify(detail);

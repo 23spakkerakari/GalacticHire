@@ -82,7 +82,7 @@ app.add_middleware(
 # Pydantic models
 class InterviewInvite(BaseModel):
     email: EmailStr
-    invite_code: str
+    invite_code: int
     interview_title: str
     recruiter_name: str
 
