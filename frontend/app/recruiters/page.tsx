@@ -74,8 +74,6 @@ const sendInvite = async () => {
   if (!inviteEmail.trim()) return;
   setInviteMessage(null);
   try {
-    // Get an invite code to include in the email.
-    // Use the most recent interview's invite_code for this recruiter.
     if (!currentUserId) {
       setInviteMessage("Unable to determine recruiter. Please log in again.");
       return;
@@ -89,7 +87,7 @@ const sendInvite = async () => {
 
     const { data: interviewRow, error: interviewError } = await supabase
       .from("interview")
-      .select("id, invite_code")
+      .select("id, title")
       .eq("recruiter_id", currentUserId)
       .eq("id", currentInterviewId)
       .single();
@@ -99,21 +97,14 @@ const sendInvite = async () => {
       return;
     }
 
-    // Prefer numeric invite codes; gracefully handle legacy string values
-    const inviteCode =
-      typeof interviewRow.invite_code === "number"
-        ? interviewRow.invite_code
-        : Number(String(interviewRow.invite_code ?? "").trim());
-
-    if (!Number.isFinite(inviteCode)) {
-      setInviteMessage("Interview is missing a valid invite code.");
-      return;
-    }
+    // Generate a per-candidate invite code for interview_invites (candidate flow uses this table).
+    const inviteCode = Math.floor(100000 + Math.random() * 900000);
 
     const payload = {
       email: inviteEmail.replace(/[\r\n]/g, "").trim(),
       invite_code: inviteCode,
-      interview_title: "Interview Invitation",
+      interview_id: Number(currentInterviewId),
+      interview_title: interviewRow?.title || "Interview Invitation",
       recruiter_name: profileData?.full_name || "HireVision Recruiter",
     };
 

@@ -27,7 +27,7 @@ def summarize_text(text):
             },
             {"role": "user"}
         ],
-        max_tokens=150
+        max_comlpetion_tokens=150
     )
     print("Summary:", response.choices[0].message.content)
     return response.choices[0].message.content
@@ -49,7 +49,7 @@ def analyze_communication(transcript):
             {"role": "system", "content": "You are a communication skills analyst."},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=200
+        max_completion_tokens=200
     )
     print("Communication Analysis:", response.choices[0].message.content)
     
@@ -93,7 +93,7 @@ def generate_behavioral_insights(transcript, job_description):
             {"role": "system", "content": "You are a creative talent scout."},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=200,
+        max_completion_tokens=200,
         temperature=0.8
     )
     print("Behavioral Insights:", response.choices[0].message.content)

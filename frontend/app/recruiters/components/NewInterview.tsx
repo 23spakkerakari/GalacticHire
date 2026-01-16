@@ -24,7 +24,7 @@ interface NewInterviewProps {
   onClose: () => void;
   recruiterId: string;
   companyNumber: string;
-  onCreated: (interview: { id: string }) => void;
+  onCreated: (interview: { id: number }) => void;
 }
 
 export default function NewInterview({ onClose, recruiterId, companyNumber, onCreated }: NewInterviewProps) {
@@ -161,78 +161,15 @@ export default function NewInterview({ onClose, recruiterId, companyNumber, onCr
       }
 
       // Send invites to candidates (each with their own invite_code)
-      const invitePromises = inviteEmails.map(async (email) => {
+        const invitePromises = inviteEmails.map(async (email) => {
         const candidateInviteCode = generateInviteCode();
         
-        console.log(`🔍 Checking for existing invite for email: ${email} and interview: ${interview.id}`);
-        
-        // Check if there's an existing invite for this email and interview
-        const { data: existingInvite, error: checkError } = await supabase
-          .from('interview_invites')
-          .select('*')
-          .eq('email', email)
-          .eq('interview_id', interview.id)
-          .single();
-
-        let dbError = null;
-
-        if (existingInvite) {
-          // Update existing invite with new code and reset status
-          console.log(`🔄 DUPLICATE FOUND! Updating existing invite for ${email}`);
-          console.log(`   - Old invite ID: ${existingInvite.id}`);
-          console.log(`   - Old invite code: ${existingInvite.invite_code}`);
-          console.log(`   - Old status: ${existingInvite.status}`);
-          console.log(`   - New invite code: ${candidateInviteCode}`);
-          console.log(`   - Resetting status to: pending`);
-          
-          const { error: updateError } = await supabase
-            .from('interview_invites')
-            .update({
-              invite_code: candidateInviteCode,
-              status: 'pending',
-              created_at: new Date().toISOString(),
-            })
-            .eq('id', existingInvite.id);
-          
-          dbError = updateError;
-          
-          if (updateError) {
-            console.error(`❌ Failed to update existing invite for ${email}:`, updateError);
-          } else {
-            console.log(`✅ Successfully updated existing invite for ${email}`);
-          }
-        } else {
-          // Create new database record
-          console.log(`🆕 No existing invite found. Creating new invite for ${email}`);
-          console.log(`   - New invite code: ${candidateInviteCode}`);
-          console.log(`   - Interview ID: ${interview.id}`);
-          
-          const { error: insertError } = await supabase.from('interview_invites').insert({
-            interview_id: interview.id,
-            email,
-            invite_code: candidateInviteCode,
-            status: 'pending',
-            created_at: new Date().toISOString(),
-          });
-          
-          dbError = insertError;
-          
-          if (insertError) {
-            console.error(`❌ Failed to create new invite for ${email}:`, insertError);
-          } else {
-            console.log(`✅ Successfully created new invite for ${email}`);
-          }
-        }
-
-        if (dbError) {
-          console.error(`❌ Database error for ${email}:`, dbError);
-          return { email, success: false, error: dbError.message };
-        }
-
         console.log(`📧 Sending email to ${email} with code: ${candidateInviteCode}`);
 
         // Send email via backend API
         try {
+
+          console.log("interview id: ", interview.id);
           const response = await fetch(`${getBackendUrl()}/send-interview-invite`, {
             method: 'POST',
             headers: {
@@ -241,6 +178,7 @@ export default function NewInterview({ onClose, recruiterId, companyNumber, onCr
             body: JSON.stringify({
               email: email,
               invite_code: candidateInviteCode,
+              interview_id: Number(interview.id),
               interview_title: interviewTitle,
               recruiter_name: recruiterName,
             }),

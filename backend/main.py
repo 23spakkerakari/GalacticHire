@@ -85,6 +85,53 @@ class InterviewInvite(BaseModel):
     invite_code: int
     interview_title: str
     recruiter_name: str
+    # Interview already exists on the frontend; pass its id so backend can persist the invite row reliably.
+    interview_id: int | None = None
+
+
+def upsert_interview_invite(invite: InterviewInvite) -> None:
+    """
+    Upsert `interview_invites` by (email, interview_id) when interview_id is provided.
+    Raises HTTPException on failure.
+    """
+    now_iso = datetime.now().isoformat()
+
+    if not invite.interview_id:
+        raise HTTPException(status_code=400, detail="Missing interview_id in request body")
+
+    existing = supabase.table("interview_invites") \
+        .select("id") \
+        .eq("email", invite.email) \
+        .eq("interview_id", invite.interview_id) \
+        .limit(1) \
+        .execute()
+
+    if getattr(existing, "error", None):
+        raise HTTPException(status_code=500, detail=f"Supabase select failed: {existing.error}")
+
+    if getattr(existing, "data", None):
+        existing_id = existing.data[0]["id"]
+        result = supabase.table("interview_invites").update({
+            "invite_code": invite.invite_code,
+            "status": "pending",
+            "created_at": now_iso,
+        }).eq("id", existing_id).execute()
+        print(f"[invite-upsert][update] id={existing_id} data={getattr(result, 'data', None)} error={getattr(result, 'error', None)}")
+        if getattr(result, "error", None):
+            raise HTTPException(status_code=500, detail=f"Supabase update failed: {result.error}")
+        return
+
+    result = supabase.table("interview_invites").insert({
+        "interview_id": invite.interview_id,
+        "email": invite.email,
+        "invite_code": invite.invite_code,
+        "status": "pending",
+        "created_at": now_iso,
+    }).execute()
+    print(f"[invite-upsert][insert] data={getattr(result, 'data', None)} error={getattr(result, 'error', None)}")
+    if getattr(result, "error", None):
+        raise HTTPException(status_code=500, detail=f"Supabase insert failed: {result.error}")
+    return
 
 class VideoURL(BaseModel):
     video_url: str
@@ -223,6 +270,9 @@ def analyze_video(video_url: str):
 
 def send_interview_invite_email(invite: InterviewInvite):
     """Send interview invitation email using Gmail SMTP"""
+    # Persist first so the invite exists even if email is simulated/fails.
+    upsert_interview_invite(invite)
+
     try:
         # Gmail SMTP configuration
         GMAIL_USER = os.getenv("GMAIL_USER")  # Your Gmail address
@@ -303,7 +353,7 @@ def send_interview_invite_email(invite: InterviewInvite):
             server.quit()
             
             print(f"✅ Email sent successfully to {invite.email}")
-            return {"success": True, "message": f"Interview invitation sent to {invite.email}"}
+            return {"success": True, "message": f"Interview invitation sent successfully to {invite.email}"}
             
         except smtplib.SMTPAuthenticationError:
             print(f"❌ Gmail authentication failed for {invite.email}")
@@ -324,6 +374,8 @@ def send_interview_invite_email(invite: InterviewInvite):
         print(f"Content: Interview code {invite.invite_code} for {invite.interview_title}")
         print(f"=== END EMAIL SIMULATION ===")
         return {"success": True, "message": f"Interview invitation simulated for {invite.email}"}
+
+    
 
 # API endpoints
 @app.post("/send-interview-invite")
