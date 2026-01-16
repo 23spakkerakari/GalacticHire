@@ -7,7 +7,6 @@ import { RecruiterProfileForm } from "./components/RecruiterProfileForm";
 import { useTransition } from "react";
 import Dashboard from "./components/Dashboard";
 import VideoAnalysis from "./components/VideoAnalysis";
-import InterviewQuestions from "./components/InterviewQuestions";
 import {
   Video,
   CandidateInterview,
@@ -591,28 +590,17 @@ const handleCloseAnalysis = () => {
           onAnswerSelect={handleAnswerSelect}
         />
       ) : (
-        <>
-          <Dashboard
-            videos={videosToUse}
-            topApplicants={topApplicants}
-            onVideoSelect={handleVideoSelect}
-            onOpenInvite={() => setInviteOpen(true)}
-            onNewInterview={() => setNewInterviewOpen(true)}
-            onBackClick={() => router.push("/recruiter-dashboard")}
-            recruiterName={profileData?.full_name}
-            recruiterEmail={userEmail || undefined}
-            recruiterId={currentUserId || undefined}
-          />
-          <div className="mt-8 max-w-7xl mx-auto px-4">
-            {currentUserId ? (
-              <InterviewQuestions recruiterId={currentUserId} />
-            ) : (
-              <div className="text-center text-white">
-                Please log in to manage interview questions.
-              </div>
-            )}
-          </div>
-        </>
+        <Dashboard
+          videos={videosToUse}
+          topApplicants={topApplicants}
+          onVideoSelect={handleVideoSelect}
+          onOpenInvite={() => setInviteOpen(true)}
+          onNewInterview={() => setNewInterviewOpen(true)}
+          onBackClick={() => router.push("/recruiter-dashboard")}
+          recruiterName={profileData?.full_name}
+          recruiterEmail={userEmail || undefined}
+          recruiterId={currentUserId || undefined}
+        />
       )}
     </div>
   );

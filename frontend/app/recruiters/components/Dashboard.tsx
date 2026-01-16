@@ -17,7 +17,6 @@ import {
 } from "recharts";
 import { Video, FilterOptions } from "../types";
 import {
-  COLORS,
   skillsData,
   experienceData,
   scoresTrend,
@@ -28,7 +27,11 @@ import { useJobDescription } from "../hooks/useJobDescription";
 import Link from "next/link";
 import { createClient } from "@/utils/auth";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import InterviewQuestions from "./InterviewQuestions";
+
+// Professional color palette
+const CHART_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#6366f1", "#ec4899"];
+
 interface DashboardProps {
   videos: Video[];
   topApplicants: string[];
@@ -41,88 +44,46 @@ interface DashboardProps {
   recruiterId?: string;
 }
 
-// Helper function to check if video matches search query
+// Helper functions
 const matchesSearchQuery = (video: Video, query: string): boolean => {
   const lowerCaseQuery = query.toLowerCase();
-
-  // Search in title
-  if (video.title.toLowerCase().includes(lowerCaseQuery)) {
-    return true;
-  }
-
-  // Search in candidate details if available
+  if (video.title.toLowerCase().includes(lowerCaseQuery)) return true;
   if (video.candidate_details) {
     const candidate = video.candidate_details;
-
     if (
       candidate.full_name.toLowerCase().includes(lowerCaseQuery) ||
       candidate.email.toLowerCase().includes(lowerCaseQuery) ||
-      (candidate.experience &&
-        candidate.experience.toLowerCase().includes(lowerCaseQuery))
-    ) {
-      return true;
-    }
+      (candidate.experience?.toLowerCase().includes(lowerCaseQuery))
+    ) return true;
   }
-
   return false;
 };
 
-// Helper function to check if video matches experience level
 const matchesExperienceLevel = (video: Video, levels: string[]): boolean => {
-  if (!video.candidate_details?.experience) {
-    return false;
-  }
-
+  if (!video.candidate_details?.experience) return false;
   const expYears = parseInt(video.candidate_details.experience);
-
   return levels.some((level) => {
-    if (level === "0-2") {
-      return expYears >= 0 && expYears <= 2;
-    } else if (level === "3-5") {
-      return expYears >= 3 && expYears <= 5;
-    } else if (level === "5+") {
-      return expYears > 5;
-    }
+    if (level === "0-2") return expYears >= 0 && expYears <= 2;
+    if (level === "3-5") return expYears >= 3 && expYears <= 5;
+    if (level === "5+") return expYears > 5;
     return false;
   });
 };
 
-// Helper function to check if video matches minimum rating
-// This is mocked since we don't have actual rating data
 const matchesRatingMin = (video: Video, minRating: number): boolean => {
-  // Mock rating - in a real application, this would come from your data
-  // For this demo, we'll create a pseudo-random rating based on the video id
-  const mockRating = (parseInt(video.id, 36) % 20) / 4 + 3; // Range between 3 and 7.75
+  const mockRating = (parseInt(video.id, 36) % 20) / 4 + 3;
   return mockRating >= minRating;
 };
 
-// Helper function to check if video is within date range
-const matchesDateRange = (
-  video: Video,
-  dateRange: { start: Date | null; end: Date | null }
-): boolean => {
-  if (!video.created_at) {
-    return true; // If there's no date, we can't filter by it
-  }
-
+const matchesDateRange = (video: Video, dateRange: { start: Date | null; end: Date | null }): boolean => {
+  if (!video.created_at) return true;
   const videoDate = new Date(video.created_at);
-
-  // Check start date
-  if (dateRange.start && videoDate < dateRange.start) {
-    return false;
-  }
-
-  // Check end date
+  if (dateRange.start && videoDate < dateRange.start) return false;
   if (dateRange.end) {
-    // Add one day to make it inclusive
     const endPlusOneDay = new Date(dateRange.end);
     endPlusOneDay.setDate(endPlusOneDay.getDate() + 1);
-
-    if (videoDate > endPlusOneDay) {
-      return false;
-    }
+    if (videoDate > endPlusOneDay) return false;
   }
-
   return true;
 };
 
@@ -138,7 +99,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   recruiterId,
 }) => {
   const router = useRouter();
-  // Filter state
+  const [activeTab, setActiveTab] = useState<"overview" | "candidates" | "questions">("overview");
+  
   const handleLogout = async () => {
     try {
       const supabase = createClient();
@@ -146,125 +108,68 @@ const Dashboard: React.FC<DashboardProps> = ({
     } catch {}
     router.push("/recruiters/login");
   };
+
   const [filters, setFilters] = useState<FilterOptions>({
     experienceLevel: ["all"],
     searchQuery: "",
     ratingMin: 0,
-    dateRange: {
-      start: null,
-      end: null,
-    },
+    dateRange: { start: null, end: null },
   });
 
-  // Job description hook
   const { jobDescription, isLoading, isSaving, error, updateJobDescription, loadJobDescription } = useJobDescription();
   const [isEditingJobDesc, setIsEditingJobDesc] = useState(false);
   const [editedJobDesc, setEditedJobDesc] = useState(jobDescription);
 
-  // Load job description when recruiterId changes (guard against double-invoke in StrictMode)
   const hasLoadedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (recruiterId !== undefined && recruiterId !== null) {
-      if (hasLoadedRef.current !== recruiterId) {
-        hasLoadedRef.current = recruiterId;
-        loadJobDescription(recruiterId);
-      }
+    if (recruiterId && hasLoadedRef.current !== recruiterId) {
+      hasLoadedRef.current = recruiterId;
+      loadJobDescription(recruiterId);
     }
   }, [recruiterId, loadJobDescription]);
 
-  // Update edited job description when jobDescription changes
   React.useEffect(() => {
     setEditedJobDesc(jobDescription);
   }, [jobDescription]);
 
-  // Filter change handler
   const handleFilterChange = (filterType: keyof FilterOptions, value: any) => {
-    setFilters((prev) => ({
-      ...prev,
-      [filterType]: value,
-    }));
-  };
-
-  // Job description handlers
-  const handleEditJobDesc = () => {
-    setIsEditingJobDesc(true);
-    setEditedJobDesc(jobDescription);
+    setFilters((prev) => ({ ...prev, [filterType]: value }));
   };
 
   const handleSaveJobDesc = async () => {
-    console.log('Save clicked, recruiterId: ', recruiterId);
-    console.log('editedJobDesc: ', editedJobDesc);
-    if (recruiterId !== undefined && recruiterId !== null) {
+    if (recruiterId) {
       await updateJobDescription(recruiterId, editedJobDesc);
       setIsEditingJobDesc(false);
-    } else{
-      console.error('No recruiterId found');
     }
   };
 
-  const handleCancelEditJobDesc = () => {
-    setEditedJobDesc(jobDescription);
-    setIsEditingJobDesc(false);
-  };
-
-  const handleJobDescChange = (value: string) => {
-    setEditedJobDesc(value);
-  };
-
-  // Apply filters to videos
   const filteredVideos = useMemo(() => {
     return videos.filter((video) => {
-      // Filter by search query
-      if (
-        filters.searchQuery &&
-        !matchesSearchQuery(video, filters.searchQuery)
-      ) {
-        return false;
-      }
-
-      // Filter by experience level
-      if (
-        !filters.experienceLevel.includes("all") &&
-        !matchesExperienceLevel(video, filters.experienceLevel)
-      ) {
-        return false;
-      }
-
-      // Filter by rating (mocked since we don't have actual rating data)
-      if (
-        filters.ratingMin > 0 &&
-        !matchesRatingMin(video, filters.ratingMin)
-      ) {
-        return false;
-      }
-
-      // Filter by date range
-      if (!matchesDateRange(video, filters.dateRange)) {
-        return false;
-      }
-
+      if (filters.searchQuery && !matchesSearchQuery(video, filters.searchQuery)) return false;
+      if (!filters.experienceLevel.includes("all") && !matchesExperienceLevel(video, filters.experienceLevel)) return false;
+      if (filters.ratingMin > 0 && !matchesRatingMin(video, filters.ratingMin)) return false;
+      if (!matchesDateRange(video, filters.dateRange)) return false;
       return true;
     });
   }, [videos, filters]);
 
-  // Calculate dynamic metrics
   const dynamicMetrics = {
     ...aggregateMetrics,
     totalApplicants: videos.length,
     applicantsInProgress: Math.floor(videos.length * 0.6),
   };
 
-  // Minimal Chatbot widget state & handlers
+  // Chat state
   const [chatInput, setChatInput] = useState("");
   const [chatReply, setChatReply] = useState<string | null>(null);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+
   const sendChat = async () => {
     if (!chatInput.trim()) return;
     setIsChatLoading(true);
     setChatReply(null);
     try {
-      // process.env.NEXT_PUBLIC_BACKEND_URL ||
       const baseUrl = "http://localhost:8000";
       const res = await fetch(`${baseUrl}/recruiter-chat`, {
         method: "POST",
@@ -272,12 +177,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         body: JSON.stringify({ prompt: chatInput, recruiter_id: recruiterId || null })
       });
       const data = await res.json();
-      if (res.ok) {
-        setChatReply(data.reply || "");
-      } else {
-        setChatReply(data.detail || "Something went wrong.");
-      }
-    } catch (e) {
+      setChatReply(res.ok ? (data.reply || "") : (data.detail || "Something went wrong."));
+    } catch {
       setChatReply("Network error. Try again.");
     } finally {
       setIsChatLoading(false);
@@ -285,369 +186,349 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 p-6 md:p-8">
-      {/* Top menu bar with actions */}
-      <div className="w-full bg-gradient-to-r from-gray-900/60 to-gray-800/40 backdrop-blur border border-gray-700/60 rounded-xl mb-6 shadow-lg">
-        <div className="max-w-7xl mx-auto h-16 px-4 md:px-6 flex items-center justify-end gap-5">
-          <Link
-            href="/recruiter-dashboard"
-            prefetch
-            className="px-6 py-2.5 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-full transition-transform duration-200 transform hover:-translate-y-0.5 shadow-sm hover:shadow-md text-base flex items-center min-w-48 ring-1 ring-gray-500/20 hover:ring-gray-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 mr-2"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Back to Home
-          </Link>
-          <button
-            onClick={onNewInterview}
-            className="px-6 py-2.5 bg-gradient-to-r from-blue-600/25 to-indigo-600/25 hover:from-blue-600/35 hover:to-indigo-600/35 text-blue-200 rounded-full transition-transform duration-200 transform hover:-translate-y-0.5 shadow-sm hover:shadow-md text-base flex items-center min-w-48 ring-1 ring-blue-400/20 hover:ring-blue-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 mr-2"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-              />
-            </svg>
-            New Interview
-          </button>
-          <button
-            onClick={onOpenInvite}
-            className="px-6 py-2.5 bg-gradient-to-r from-emerald-600/25 to-teal-600/25 hover:from-emerald-600/35 hover:to-teal-600/35 text-emerald-200 rounded-full transition-transform duration-200 transform hover:-translate-y-0.5 shadow-sm hover:shadow-md text-base flex items-center min-w-48 ring-1 ring-emerald-400/20 hover:ring-emerald-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 mr-2"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M12 2a5 5 0 110 10 5 5 0 010-10z" />
-              <path d="M2 20a8 8 0 0116 0v1H2v-1z" />
-              <path d="M19 10a1 1 0 00-1 1v2h-2a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2v-2a1 1 0 00-1-1z" />
-            </svg>
-            Invite Candidate
-          </button>
-          <button
-            onClick={handleLogout}
-            className="px-6 py-2.5 bg-gradient-to-r from-rose-600/25 to-red-600/25 hover:from-rose-600/35 hover:to-red-600/35 text-red-200 rounded-full transition-transform duration-200 transform hover:-translate-y-0.5 shadow-sm hover:shadow-md text-base flex items-center min-w-48 ring-1 ring-rose-400/20 hover:ring-rose-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 mr-2"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path fillRule="evenodd" d="M3 4.5A1.5 1.5 0 014.5 3h7a1.5 1.5 0 011.5 1.5v3a.75.75 0 01-1.5 0v-3h-7v15h7v-3a.75.75 0 011.5 0v3A1.5 1.5 0 0111.5 21h-7A1.5 1.5 0 013 19.5v-15z" clipRule="evenodd" />
-              <path d="M16.28 8.22a.75.75 0 10-1.06 1.06L17.94 12l-2.72 2.72a.75.75 0 101.06 1.06l3.25-3.25a.75.75 0 000-1.06l-3.25-3.25z" />
-            </svg>
-            Logout
-          </button>
-        </div>
-      </div>
-      {/* Header with title */}
-      <header className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-gray-700 pb-4">
-        <h1 className="text-3xl md:text-4xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-          Recruitment Dashboard
-        </h1>
-        <div className="flex items-center space-x-4">
-          {recruiterName && recruiterEmail && (
-            <div className="text-right">
-              <div className="text-white font-semibold">{recruiterName}</div>
-              <div className="text-gray-400 text-sm">{recruiterEmail}</div>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto mb-10">
-        {/* Key Metrics Banner */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <MetricCard
-            value={dynamicMetrics.totalApplicants}
-            label="Total Applicants"
-            color="blue"
-            icon={
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                />
-              </svg>
-            }
-          />
-          <MetricCard
-            value={dynamicMetrics.averageTechnicalScore}
-            label="Avg Technical Score"
-            color="green"
-            icon={
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
-                />
-              </svg>
-            }
-          />
-          <MetricCard
-            value={dynamicMetrics.averageCommunicationScore}
-            label="Avg Communication Score"
-            color="purple"
-            icon={
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                />
-              </svg>
-            }
-          />
-          <MetricCard
-            value={dynamicMetrics.applicantsInProgress}
-            label="In Progress"
-            color="amber"
-            icon={
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            }
-          />
-        </div>
-
-        {/* Main Grid Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* Left Column - Job Description */}
-          <div className="lg:col-span-1 space-y-6">
-            <JobDescriptionCard 
-              jobDescription={jobDescription}
-              isEditing={isEditingJobDesc}
-              editedJobDescription={editedJobDesc}
-              onEdit={handleEditJobDesc}
-              onSave={handleSaveJobDesc}
-              onCancel={handleCancelEditJobDesc}
-              onChange={handleJobDescChange}
-              isLoading={isLoading}
-              isSaving={isSaving}
-              error={error}
-            />
-
-            {/* New addition: Quick Stats Card */}
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5 mr-2 text-blue-400"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+    <div className="min-h-screen bg-slate-950">
+      {/* Top Navigation */}
+      <nav className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-sm border-b border-slate-800/50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            {/* Logo */}
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                Quick Stats
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Positions Open</span>
-                  <span className="text-white font-semibold">3</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Interviews This Week</span>
-                  <span className="text-white font-semibold">12</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Avg. Time to Hire</span>
-                  <span className="text-white font-semibold">18 days</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Offer Acceptance Rate</span>
-                  <span className="text-white font-semibold">86%</span>
+              </div>
+              <span className="text-base font-semibold text-white">HireVision</span>
+            </div>
+
+            {/* Center Tabs */}
+            <div className="hidden md:flex items-center gap-1 p-1 rounded-lg bg-slate-900/50 border border-slate-800/50">
+              {[
+                { id: "overview", label: "Overview" },
+                { id: "candidates", label: "Candidates" },
+                { id: "questions", label: "Questions" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+                    activeTab === tab.id
+                      ? "bg-slate-800 text-white"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Right Actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onNewInterview}
+                className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Interview
+              </button>
+              
+              <button
+                onClick={onOpenInvite}
+                className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm font-medium hover:bg-slate-700 border border-slate-700 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                </svg>
+                Invite
+              </button>
+
+              {/* Profile dropdown */}
+              <div className="relative group">
+                <button className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 transition-colors">
+                  <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white text-xs font-medium">
+                    {recruiterName?.charAt(0) || "R"}
+                  </div>
+                  <span className="hidden sm:block text-sm text-slate-200">{recruiterName?.split(" ")[0] || "Recruiter"}</span>
+                  <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                <div className="absolute right-0 mt-2 w-48 py-1 bg-slate-900 rounded-lg border border-slate-800 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+                  <div className="px-4 py-2 border-b border-slate-800">
+                    <p className="text-sm text-white font-medium">{recruiterName}</p>
+                    <p className="text-xs text-slate-400">{recruiterEmail}</p>
+                  </div>
+                  <Link href="/recruiter-dashboard" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800/50 transition-colors">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                    Home
+                  </Link>
+                  <button onClick={handleLogout} className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-slate-800/50 transition-colors">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                    Sign out
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-
-          {/* Right Column - Charts Container */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <SkillsChart />
-              <ScoreTrendsChart />
-            </div>
-            <ExperienceDistributionChart />
-          </div>
         </div>
+      </nav>
 
-        {/* Filter Panel */}
-        <FilterPanel
-          filters={filters}
-          onFilterChange={handleFilterChange}
-          totalResults={filteredVideos.length}
-        />
-
-        {/* Minimal Chatbot */}
-        <section className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg mb-8">
-          <h2 className="text-2xl font-bold text-white mb-4 flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l.8-4A7.5 7.5 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            Recruiter Chat (beta)
-          </h2>
-          <div className="flex flex-col md:flex-row gap-3">
-            <input
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Ask something quick (e.g., summarize pipeline)..."
-              className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white"
-            />
+      {/* Mobile Tab Bar */}
+      <div className="md:hidden sticky top-16 z-30 bg-slate-950/95 backdrop-blur-sm border-b border-slate-800/50 px-4 py-2">
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900/50 border border-slate-800/50">
+          {[
+            { id: "overview", label: "Overview" },
+            { id: "candidates", label: "Candidates" },
+            { id: "questions", label: "Questions" },
+          ].map((tab) => (
             <button
-              onClick={sendChat}
-              disabled={isChatLoading || !chatInput.trim()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/40 text-white rounded-lg"
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                activeTab === tab.id
+                  ? "bg-slate-800 text-white"
+                  : "text-slate-400"
+              }`}
             >
-              {isChatLoading ? "Thinking..." : "Send"}
+              {tab.label}
             </button>
-          </div>
-          {chatReply && (
-            <div className="mt-3 text-gray-200 bg-gray-900/40 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap">
-              {chatReply}
-            </div>
-          )}
-        </section>
-
-        {/* Applications Section */}
-        <section className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
-          <h2 className="text-2xl font-bold text-white mb-6 pb-2 border-b border-gray-700 flex items-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6 mr-2 text-blue-400"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
-              <path
-                fillRule="evenodd"
-                d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Applications
-            <span className="ml-3 bg-blue-500 text-white text-sm rounded-full px-2 py-1">
-              {filteredVideos.length}
-            </span>
-          </h2>
-
-          {filteredVideos.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredVideos.map((video) => (
-                <ApplicationCard
-                  key={video.id}
-                  video={video}
-                  isTopApplicant={topApplicants.includes(video.title)}
-                  onSelect={() => onVideoSelect(video)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-12 w-12 text-gray-500 mx-auto mb-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <p className="text-gray-400 text-lg">
-                No matching candidates found
-              </p>
-              <p className="text-gray-500 mt-2">
-                Try adjusting your filters to see more results
-              </p>
-            </div>
-          )}
-        </section>
+          ))}
+        </div>
       </div>
-      {/* Floating Chat Widget */}
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Overview Tab */}
+        {activeTab === "overview" && (
+          <div className="space-y-8">
+            {/* Welcome Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold text-white">
+                  Welcome back, {recruiterName?.split(" ")[0] || "there"}
+                </h1>
+                <p className="mt-1 text-slate-400 text-sm">Here's your hiring pipeline overview</p>
+              </div>
+              <div className="flex gap-2 sm:hidden">
+                <button onClick={onNewInterview} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                  New
+                </button>
+                <button onClick={onOpenInvite} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm font-medium border border-slate-700">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197" /></svg>
+                  Invite
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <MetricCard value={dynamicMetrics.totalApplicants} label="Total Applicants" color="blue" />
+              <MetricCard value={dynamicMetrics.averageTechnicalScore} label="Avg Technical" color="emerald" />
+              <MetricCard value={dynamicMetrics.averageCommunicationScore} label="Avg Communication" color="indigo" />
+              <MetricCard value={dynamicMetrics.applicantsInProgress} label="In Progress" color="amber" />
+            </div>
+
+            {/* Two Column Layout */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              {/* Left Column */}
+              <div className="space-y-6">
+                {/* Job Description Card */}
+                <div className="rounded-xl bg-slate-900/50 border border-slate-800/50 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                      <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Job Description
+                    </h3>
+                    {!isEditingJobDesc && (
+                      <button onClick={() => setIsEditingJobDesc(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  
+                  {isEditingJobDesc ? (
+                    <div className="space-y-3">
+                      <textarea
+                        value={editedJobDesc}
+                        onChange={(e) => setEditedJobDesc(e.target.value)}
+                        className="w-full h-32 px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-200 text-sm resize-none focus:outline-none focus:border-blue-500/50 placeholder-slate-500"
+                        placeholder="Enter job description..."
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={handleSaveJobDesc} disabled={isSaving} className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-50 transition-colors">
+                          {isSaving ? "Saving..." : "Save"}
+                        </button>
+                        <button onClick={() => { setIsEditingJobDesc(false); setEditedJobDesc(jobDescription); }} className="px-3 py-1.5 rounded-md bg-slate-800 text-slate-300 text-xs hover:bg-slate-700 transition-colors">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-400 leading-relaxed line-clamp-5">
+                      {jobDescription || "No job description set. Click Edit to add one."}
+                    </p>
+                  )}
+                </div>
+
+                {/* Quick Stats */}
+                <div className="rounded-xl bg-slate-900/50 border border-slate-800/50 p-5">
+                  <h3 className="text-sm font-medium text-white mb-4 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    Quick Stats
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: "Positions Open", value: "3" },
+                      { label: "Interviews This Week", value: "12" },
+                      { label: "Avg. Time to Hire", value: "18 days" },
+                      { label: "Offer Rate", value: "86%" },
+                    ].map((stat, i) => (
+                      <div key={stat.label} className={`flex items-center justify-between py-2 ${i < 3 ? 'border-b border-slate-800/50' : ''}`}>
+                        <span className="text-sm text-slate-400">{stat.label}</span>
+                        <span className="text-sm font-medium text-white">{stat.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Charts */}
+              <div className="lg:col-span-2 space-y-6">
+                <div className="grid md:grid-cols-2 gap-6">
+                  <ChartCard title="Skills Distribution">
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={[...skillsData]} barSize={20} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "8px", fontSize: "12px" }} itemStyle={{ color: "#e2e8f0" }} />
+                        <Bar dataKey="score" radius={[4, 4, 0, 0]}>
+                          {skillsData.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+
+                  <ChartCard title="Score Trends">
+                    <ResponsiveContainer width="100%" height={180}>
+                      <LineChart data={scoresTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                        <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={11} domain={[0, 10]} tickLine={false} axisLine={false} />
+                        <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "8px", fontSize: "12px" }} />
+                        <Legend iconType="circle" iconSize={6} wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
+                        <Line type="monotone" dataKey="technical" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: "#3b82f6" }} />
+                        <Line type="monotone" dataKey="communication" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: "#10b981" }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                </div>
+
+                <ChartCard title="Experience Distribution">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={[...experienceData]} cx="50%" cy="50%" labelLine={false} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`} outerRadius={65} innerRadius={30} paddingAngle={2} dataKey="value">
+                        {experienceData.map((_, index) => (
+                          <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} stroke="#020617" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value, name) => [`${value} candidates`, name]} contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "8px", fontSize: "12px" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Candidates Tab */}
+        {activeTab === "candidates" && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-white">Candidates</h2>
+                <p className="mt-1 text-slate-400 text-sm">Review and manage applicants</p>
+              </div>
+              <div className="text-sm text-slate-400">
+                Showing <span className="text-white font-medium">{filteredVideos.length}</span> of {videos.length}
+              </div>
+            </div>
+
+            <FilterPanel filters={filters} onFilterChange={handleFilterChange} totalResults={filteredVideos.length} />
+
+            {filteredVideos.length > 0 ? (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredVideos.map((video) => (
+                  <CandidateCard
+                    key={video.id}
+                    video={video}
+                    isTopApplicant={topApplicants.includes(video.title)}
+                    onSelect={() => onVideoSelect(video)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-16 rounded-xl bg-slate-900/50 border border-slate-800/50">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-slate-800/50 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </div>
+                <p className="text-slate-300">No matching candidates</p>
+                <p className="text-slate-500 text-sm mt-1">Try adjusting your filters</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Questions Tab */}
+        {activeTab === "questions" && recruiterId && (
+          <div>
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-white">Interview Questions</h2>
+              <p className="mt-1 text-slate-400 text-sm">Manage questions for your interviews</p>
+            </div>
+            <InterviewQuestions recruiterId={recruiterId} />
+          </div>
+        )}
+      </main>
+
+      {/* Floating Chat */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
         {isChatOpen && (
-          <div className="w-80 bg-gray-800 rounded-xl border border-gray-700 shadow-2xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-white font-semibold text-sm">Recruiter Chat</div>
-              <button onClick={() => setIsChatOpen(false)} className="text-gray-400 hover:text-white">
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          <div className="w-80 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-800/50 border-b border-slate-800">
+              <span className="text-sm font-medium text-white">AI Assistant</span>
+              <button onClick={() => setIsChatOpen(false)} className="text-slate-400 hover:text-white transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="space-y-2">
+            <div className="p-4 space-y-3">
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask a quick question..."
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+                placeholder="Ask about your pipeline..."
+                className="w-full px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
+                onKeyDown={(e) => e.key === "Enter" && sendChat()}
               />
               <button
                 onClick={sendChat}
                 disabled={isChatLoading || !chatInput.trim()}
-                className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/40 text-white rounded-lg text-sm"
+                className="w-full px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition-colors"
               >
                 {isChatLoading ? "Thinking..." : "Send"}
               </button>
               {chatReply && (
-                <div className="text-gray-200 bg-gray-900/40 border border-gray-700 rounded-lg p-2 text-sm whitespace-pre-wrap max-h-40 overflow-auto">
+                <div className="p-3 rounded-lg bg-slate-800/50 text-sm text-slate-300 whitespace-pre-wrap max-h-40 overflow-auto">
                   {chatReply}
                 </div>
               )}
@@ -655,526 +536,83 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         )}
         <button
-          onClick={() => setIsChatOpen((v: boolean) => !v)}
-          className="w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center"
-          title="Chat"
+          onClick={() => setIsChatOpen((v) => !v)}
+          className="w-11 h-11 rounded-xl bg-blue-600 text-white shadow-lg hover:bg-blue-500 flex items-center justify-center transition-colors"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l.8-4A7.5 7.5 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
         </button>
       </div>
     </div>
   );
 };
 
-interface MetricCardProps {
-  value: number;
-  label: string;
-  color: "blue" | "green" | "purple" | "amber";
-  icon: React.ReactNode;
-}
-
-// Enhanced Sub-components
-const MetricCard = ({ value, label, color, icon }: MetricCardProps) => {
-  const colorClasses = {
-    blue: "text-blue-400",
-    green: "text-green-400",
-    purple: "text-purple-400",
-    amber: "text-amber-400",
+// Sub-components
+const MetricCard = ({ value, label, color }: { value: number; label: string; color: "blue" | "emerald" | "indigo" | "amber" }) => {
+  const colorMap = {
+    blue: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/20" },
+    emerald: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20" },
+    indigo: { bg: "bg-indigo-500/10", text: "text-indigo-400", border: "border-indigo-500/20" },
+    amber: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20" },
   };
+  const c = colorMap[color];
 
   return (
-    <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-lg transition-all hover:shadow-xl hover:border-gray-600">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className={`text-3xl font-bold ${colorClasses[color]}`}>
-            {value}
-          </div>
-          <div className="text-sm text-gray-400 mt-1">{label}</div>
-        </div>
-        <div className={`p-3 rounded-full bg-gray-700 ${colorClasses[color]}`}>
-          {icon}
-        </div>
-      </div>
+    <div className={`rounded-xl ${c.bg} border ${c.border} p-4`}>
+      <div className={`text-2xl font-semibold ${c.text}`}>{value}</div>
+      <div className="text-sm text-slate-400 mt-1">{label}</div>
     </div>
   );
 };
 
-interface JobDescriptionCardProps {
-  jobDescription: string;
-  isEditing: boolean;
-  editedJobDescription: string;
-  onEdit: () => void;
-  onSave: () => void;
-  onCancel: () => void;
-  onChange: (value: string) => void;
-  isLoading?: boolean;
-  isSaving?: boolean;
-  error?: string | null;
-}
-
-const JobDescriptionCard = ({ 
-  jobDescription, 
-  isEditing, 
-  editedJobDescription, 
-  onEdit, 
-  onSave, 
-  onCancel, 
-  onChange,
-  isLoading = false,
-  isSaving = false,
-  error = null
-}: JobDescriptionCardProps) => {
-  const currentDescription = isEditing ? editedJobDescription : jobDescription;
-  const [isModalOpen, setIsModalOpen] = React.useState(false);
-
-  return (
-    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
-      {error && (
-        <div className="mb-4 p-3 bg-red-900/20 border border-red-500/50 rounded-lg text-red-300 text-sm">
-          {error}
-        </div>
-      )}
-      
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center">
-          <div className="p-2 bg-blue-400 bg-opacity-20 rounded-lg mr-3">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6 text-blue-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-              />
-            </svg>
-          </div>
-          <h3 className="text-xl font-bold text-white">Job Description</h3>
-        </div>
-        
-        <div className="flex space-x-2">
-          {isEditing ? (
-            <>
-              <button
-                onClick={onSave}
-                disabled={isSaving}
-                className="px-3 py-1 bg-green-600 hover:bg-green-700 disabled:bg-green-800 disabled:cursor-not-allowed text-white text-sm rounded transition-colors flex items-center"
-              >
-                {isSaving ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Saving...
-                  </>
-                ) : (
-                  'Save'
-                )}
-              </button>
-              <button
-                onClick={onCancel}
-                disabled={isSaving}
-                className="px-3 py-1 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800 disabled:cursor-not-allowed text-white text-sm rounded transition-colors"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={onEdit}
-              disabled={isLoading}
-              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white text-sm rounded transition-colors flex items-center"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 mr-1"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
-              </svg>
-              {isLoading ? 'Loading...' : 'Edit'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div>
-        {isEditing ? (
-          <textarea
-            value={currentDescription}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full text-gray-300 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm min-h-[200px] resize-y"
-            placeholder="Enter job description..."
-          />
-        ) : (
-          <div className="relative">
-            <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap h-40 overflow-hidden rounded border border-gray-700 bg-gray-900/30 p-3">
-              {currentDescription || "No job description provided. Click Edit to add one."}
-            </div>
-            {/* Fade overlay */}
-            <div className="pointer-events-none absolute bottom-10 left-0 right-0 h-10 bg-gradient-to-t from-gray-800 to-transparent" />
-            <div className="mt-3 flex justify-end">
-              <button
-                onClick={() => setIsModalOpen(true)}
-                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition-colors"
-              >
-                View full
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Fullscreen modal for job description */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-gray-800 w-full max-w-3xl max-h-[85vh] rounded-xl border border-gray-700 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-700">
-              <h4 className="text-white font-semibold">Job Description</h4>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="p-4 overflow-y-auto max-h-[75vh]">
-              <div className="whitespace-pre-wrap text-gray-300 text-sm">
-                {jobDescription || "No job description provided."}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-interface SkillsChartProps { }
-
-// Create a type based on the skillsData constant
-type SkillData = (typeof skillsData)[number];
-
-const SkillsChart = ({ }: SkillsChartProps) => (
-  <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg h-full">
-    <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-5 w-5 mr-2 text-blue-400"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-      >
-        <path
-          fillRule="evenodd"
-          d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z"
-          clipRule="evenodd"
-        />
-      </svg>
-      Skills Distribution
-    </h3>
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart
-        data={[...skillsData] as SkillData[]}
-        barSize={30}
-        margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
-      >
-        <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
-        <XAxis
-          dataKey="name"
-          stroke="#9ca3af"
-          fontSize={12}
-          tickLine={false}
-          axisLine={false}
-        />
-        <YAxis
-          stroke="#9ca3af"
-          fontSize={12}
-          tickLine={false}
-          axisLine={false}
-        />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "#1f2937",
-            border: "none",
-            borderRadius: "8px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
-          }}
-          itemStyle={{ color: "#fff" }}
-          labelStyle={{
-            color: "#9ca3af",
-            fontWeight: "bold",
-            marginBottom: "5px",
-          }}
-        />
-        <Bar dataKey="score" fill="#8884d8" radius={[4, 4, 0, 0]}>
-          {skillsData.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+const ChartCard = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div className="rounded-xl bg-slate-900/50 border border-slate-800/50 p-5">
+    <h3 className="text-sm font-medium text-white mb-4">{title}</h3>
+    {children}
   </div>
 );
 
-const ScoreTrendsChart = () => (
-  <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg h-full">
-    <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-5 w-5 mr-2 text-blue-400"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-      >
-        <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
-      </svg>
-      Score Trends
-    </h3>
-    <ResponsiveContainer width="100%" height={220}>
-      <LineChart
-        data={scoresTrend}
-        margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
-      >
-        <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-        <XAxis
-          dataKey="month"
-          stroke="#9ca3af"
-          fontSize={12}
-          tickLine={false}
-          axisLine={false}
-        />
-        <YAxis
-          stroke="#9ca3af"
-          fontSize={12}
-          domain={[0, 10]}
-          tickLine={false}
-          axisLine={false}
-        />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "#1f2937",
-            border: "none",
-            borderRadius: "8px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
-          }}
-          itemStyle={{ color: "#fff" }}
-          labelStyle={{
-            color: "#9ca3af",
-            fontWeight: "bold",
-            marginBottom: "5px",
-          }}
-        />
-        <Legend
-          iconType="circle"
-          iconSize={8}
-          wrapperStyle={{ paddingTop: 10, fontSize: 12, color: "#9ca3af" }}
-        />
-        <Line
-          type="monotone"
-          dataKey="technical"
-          stroke="#8884d8"
-          strokeWidth={3}
-          dot={{ r: 4, fill: "#8884d8", strokeWidth: 2, stroke: "#1f2937" }}
-          activeDot={{ r: 6 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="communication"
-          stroke="#82ca9d"
-          strokeWidth={3}
-          dot={{ r: 4, fill: "#82ca9d", strokeWidth: 2, stroke: "#1f2937" }}
-          activeDot={{ r: 6 }}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-  </div>
-);
-
-const ExperienceDistributionChart = () => (
-  <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
-    <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-5 w-5 mr-2 text-blue-400"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-      >
-        <path
-          fillRule="evenodd"
-          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-          clipRule="evenodd"
-        />
-      </svg>
-      Experience Distribution
-    </h3>
-    <div className="flex flex-col md:flex-row items-center">
-      <ResponsiveContainer width="100%" height={220}>
-        <PieChart>
-          <Pie
-            data={[...experienceData] as (typeof experienceData)[number][]}
-            cx="50%"
-            cy="50%"
-            labelLine={false}
-            label={({ name, percent }) =>
-              `${name} (${(percent * 100).toFixed(0)}%)`
-            }
-            outerRadius={80}
-            innerRadius={40}
-            paddingAngle={2}
-            dataKey="value"
-          >
-            {experienceData.map((_, index) => (
-              <Cell
-                key={`cell-${index}`}
-                fill={COLORS[index % COLORS.length]}
-                stroke="#1f2937"
-                strokeWidth={2}
-              />
-            ))}
-          </Pie>
-          <Tooltip
-            formatter={(value, name) => [`${value} candidates`, name]}
-            contentStyle={{
-              backgroundColor: "#1f2937",
-              border: "none",
-              borderRadius: "8px",
-              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
-            }}
-          />
-          <Legend
-            iconType="circle"
-            iconSize={8}
-            layout="vertical"
-            verticalAlign="middle"
-            align="right"
-            wrapperStyle={{ fontSize: 12, color: "#9ca3af" }}
-          />
-        </PieChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-);
-
-interface ApplicationCardProps {
-  video: Video;
-  isTopApplicant: boolean;
-  onSelect: () => void;
-}
-
-const ApplicationCard = ({
-  video,
-  isTopApplicant,
-  onSelect,
-}: ApplicationCardProps) => (
+const CandidateCard = ({ video, isTopApplicant, onSelect }: { video: Video; isTopApplicant: boolean; onSelect: () => void }) => (
   <button
     onClick={onSelect}
-    className={`
-      w-full text-left rounded-xl overflow-hidden transition-all duration-200
-      ${isTopApplicant
-        ? "bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 shadow-lg hover:shadow-xl"
-        : "bg-gray-700 hover:bg-gray-600 border border-gray-600"
-      }
-    `}
+    className={`w-full text-left rounded-xl p-4 transition-all group ${
+      isTopApplicant
+        ? "bg-blue-500/5 border border-blue-500/20 hover:bg-blue-500/10 hover:border-blue-500/30"
+        : "bg-slate-900/50 border border-slate-800/50 hover:bg-slate-800/50 hover:border-slate-700/50"
+    }`}
   >
-    <div className="p-4">
-      {/* Video preview thumbnail (placeholder) */}
-      {isTopApplicant && (
-        <div className="flex justify-end -mt-2 -mr-2 mb-1">
-          <div className="bg-green-400 text-xs font-medium text-gray-900 rounded-full px-2 py-0.5 flex items-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-3 w-3 mr-1"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Top Candidate
-          </div>
-        </div>
-      )}
-
-      <div className="font-medium text-white mb-1">{video.title}</div>
-
-      {video.candidate_details && (
-        <div className="space-y-1 mt-2">
-          <div className="flex items-center text-sm text-gray-300">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4 mr-1 opacity-70"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zm-4 7a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-              />
-            </svg>
-            {video.candidate_details.full_name}
-          </div>
-
-          <div className="flex items-center text-sm text-gray-300">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4 mr-1 opacity-70"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-              />
-            </svg>
-            {video.candidate_details.experience} years exp.
-          </div>
-        </div>
-      )}
-
-      <div className="mt-3 text-xs font-medium">
-        <span
-          className={`inline-flex items-center rounded-full px-2.5 py-1 ${isTopApplicant
-              ? "bg-blue-800 text-blue-200"
-              : "bg-gray-600 text-gray-300"
-            }`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-3 w-3 mr-1"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.445-10.832A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-              clipRule="evenodd"
-            />
-          </svg>
-          View Details
-        </span>
+    {isTopApplicant && (
+      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-3">
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+        Top Candidate
       </div>
+    )}
+    
+    <div className="flex items-start gap-3">
+      <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center text-slate-300 text-sm font-medium shrink-0">
+        {video.candidate_details?.full_name?.charAt(0) || "?"}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-white text-sm truncate">{video.candidate_details?.full_name || video.title}</p>
+        <p className="text-xs text-slate-500 truncate">{video.candidate_details?.email || ""}</p>
+      </div>
+    </div>
+
+    {video.candidate_details?.experience && (
+      <div className="mt-3 text-xs text-slate-500">
+        {video.candidate_details.experience} years experience
+      </div>
+    )}
+
+    <div className="mt-3 flex items-center justify-between">
+      <span className="text-xs text-slate-600">
+        {video.created_at ? new Date(video.created_at).toLocaleDateString() : ""}
+      </span>
+      <span className="text-xs text-blue-400 group-hover:text-blue-300 transition-colors flex items-center gap-1">
+        View
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+      </span>
     </div>
   </button>
 );
