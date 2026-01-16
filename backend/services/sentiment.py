@@ -86,17 +86,7 @@ def generate_behavioral_insights(transcript, job_description):
         "Format the output as a JSON object with a single key 'insights' which is an array of strings. For example:\n"
         '{"insights": ["🎤 Presented at a major conference", "🎸 Plays in a band on weekends"]}'
     )
-
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[
-            {"role": "system", "content": "You are a creative talent scout."},
-            {"role": "user", "content": prompt}
-        ],
-        max_completion_tokens=200,
-        temperature=0.8
-    )
-    print("Behavioral Insights:", response.choices[0].message.content)
+oral Insights:", response.choices[0].message.content)
     
     # Clean the response content to handle markdown formatting
     content = response.choices[0].message.content.strip()
