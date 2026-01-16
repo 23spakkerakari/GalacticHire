@@ -27,7 +27,7 @@ def summarize_text(text):
             },
             {"role": "user"}
         ],
-        max_comlpetion_tokens=150
+        max_completion_tokens=150
     )
     print("Summary:", response.choices[0].message.content)
     return response.choices[0].message.content

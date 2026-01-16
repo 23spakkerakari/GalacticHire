@@ -12,7 +12,6 @@ from typing import List, Optional
 import spacy
 import json
 from services.sentiment import summarize_text, analyze_communication, generate_behavioral_insights
-# from services.resume_parser import ResumeParser
 import requests
 import subprocess
 import librosa
@@ -23,22 +22,20 @@ from email.mime.multipart import MIMEMultipart
 import requests as httpx
 import pdfplumber
 
-# Load environment variables
 load_dotenv()
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLY")
 OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Add this to your .env file
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
-# Initialize services
 aai.settings.api_key = ASSEMBLYAI_API_KEY
 transcriber = aai.Transcriber()
 client = OpenAI(api_key=OPEN_AI_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 nlp = spacy.load("en_core_web_sm")
-# --- Auth helpers ---
+
 def get_current_user_id(req: Request) -> str:
     """Resolve current user id (UUID) via Supabase Auth /auth/v1/user.
     Requires Authorization: Bearer <access_token> header from the client.
@@ -69,7 +66,6 @@ def get_current_user_id(req: Request) -> str:
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid auth response")
 
-# FastAPI app setup
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -79,13 +75,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic models
 class InterviewInvite(BaseModel):
     email: EmailStr
     invite_code: int
     interview_title: str
     recruiter_name: str
-    # Interview already exists on the frontend; pass its id so backend can persist the invite row reliably.
     interview_id: int | None = None
 
 
@@ -161,44 +155,14 @@ def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
         "Themes (comma-separated):"
     )
 
-    response = client.completions.create(engine="text-davinci-003",  # or another suitable engine
+    response = client.completions.create(engine="text-davinci-003",
     prompt=prompt,
-    max_tokens=100,
+    max_completion_tokens=100,
     temperature=0.5)
 
     raw_themes = response.choices[0].text.strip()
-    # Split and clean the themes
     themes = [theme.strip() for theme in raw_themes.split(",") if theme.strip()]
     return themes[:num_themes]
-
-def detect_enthusiasm(audio_file: str, sr: int = 22050, energy_threshold: float = 0.6) -> list:
-    """
-    Given an audio file, return a list of timestamps (in seconds) where the energy peaks.
-    This is a simplistic approach; you can adapt it to use pitch or a pretrained model.
-    """
-    # Load the audio file
-    y, sr = librosa.load(audio_file, sr=sr)
-
-    # Compute RMS energy for short frames
-    hop_length = 512
-    frame_length = 1024
-    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
-
-    # Normalize energy to 0-1 range
-    rms_norm = (rms - np.min(rms)) / (np.max(rms) - np.min(rms) + 1e-6)
-
-    # Identify frames where normalized energy exceeds the threshold
-    enthusiastic_frames = np.where(rms_norm > energy_threshold)[0]
-
-    # Convert frame indices to timestamps
-    timestamps = librosa.frames_to_time(enthusiastic_frames, sr=sr, hop_length=hop_length)
-    filtered_timestamps = []
-    prev = -999
-    for t in timestamps:
-        if t - prev > 1.0:  # at least 1 second apart
-            filtered_timestamps.append(round(t, 2))
-            prev = t
-    return filtered_timestamps
 
 def extract_audio_from_video(video_url: str, output_audio: str) -> None:
     """
@@ -215,10 +179,7 @@ def analyze_video(video_url: str):
         if not video_url or not video_url.startswith('http'):
             raise ValueError("Invalid video URL format")
 
-        # Transcribe the video file
         transcript = transcriber.transcribe(video_url)
-
-        # Check if transcript exists and has text
         if not transcript or not hasattr(transcript, 'text') or not transcript.text:
             print("Transcription failed or returned empty result")
             return {
@@ -233,14 +194,12 @@ def analyze_video(video_url: str):
 
         print(f"Transcription successful. Length: {len(transcript.text)}")
 
-        # Process transcript
         transcript_text = transcript.text
         summary = summarize_text(transcript_text)
         communication_analysis = analyze_communication(transcript_text)
         behavioral_insights = generate_behavioral_insights(transcript_text, supabase.table('job_descriptions').select('description').eq('recruiter_id', video.user_id ).execute().data[0].get('description'))
         print("Quick recruiter-id check", video.user_id)
 
-        # Save summary to file
         os.makedirs("txt_files", exist_ok=True)
         filename = f"summary_{abs(hash(video_url))}.txt"
         with open(os.path.join("txt_files", filename), "w") as file:
@@ -269,13 +228,11 @@ def analyze_video(video_url: str):
 
 def send_interview_invite_email(invite: InterviewInvite):
     """Send interview invitation email using Gmail SMTP"""
-    # Persist first so the invite exists even if email is simulated/fails.
     upsert_interview_invite(invite)
 
     try:
-        # Gmail SMTP configuration
-        GMAIL_USER = os.getenv("GMAIL_USER")  # Your Gmail address
-        GMAIL_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")  # Gmail App Password
+        GMAIL_USER = os.getenv("GMAIL_USER")   
+        GMAIL_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")  
         
         if not GMAIL_USER or not GMAIL_PASSWORD:
             print("Gmail credentials not configured. Falling back to simulation mode.")
@@ -286,13 +243,11 @@ def send_interview_invite_email(invite: InterviewInvite):
             print(f"=== END EMAIL SIMULATION ===")
             return {"success": True, "message": f"Interview invitation simulated for {invite.email}"}
         
-        # Create message
         msg = MIMEMultipart('alternative')
         msg['Subject'] = f"Interview Invitation: {invite.interview_title}"
         msg['From'] = GMAIL_USER
         msg['To'] = invite.email
         
-        # HTML content
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #2563eb;">Interview Invitation</h2>
@@ -313,7 +268,6 @@ def send_interview_invite_email(invite: InterviewInvite):
         </div>
         """
         
-        # Plain text content (fallback)
         text_content = f"""
         Interview Invitation
             
@@ -335,14 +289,12 @@ def send_interview_invite_email(invite: InterviewInvite):
         {invite.recruiter_name}
         """
         
-        # Attach both HTML and text versions
         text_part = MIMEText(text_content, 'plain')
         html_part = MIMEText(html_content, 'html')
         
         msg.attach(text_part)
         msg.attach(html_part)
         
-        # Send email via Gmail SMTP
         try:
             server = smtplib.SMTP('smtp.gmail.com', 587)
             server.starttls()
@@ -351,22 +303,21 @@ def send_interview_invite_email(invite: InterviewInvite):
             server.send_message(msg)
             server.quit()
             
-            print(f"✅ Email sent successfully to {invite.email}")
+            print(f"Email sent successfully to {invite.email}")
             return {"success": True, "message": f"Interview invitation sent successfully to {invite.email}"}
             
         except smtplib.SMTPAuthenticationError:
-            print(f"❌ Gmail authentication failed for {invite.email}")
+            print(f"Gmail authentication failed for {invite.email}")
             return {"success": False, "message": "Gmail authentication failed. Please check your credentials."}
         except smtplib.SMTPException as e:
-            print(f"❌ SMTP error for {invite.email}: {str(e)}")
+            print(f"SMTP error for {invite.email}: {str(e)}")
             return {"success": False, "message": f"SMTP error: {str(e)}"}
         except Exception as e:
-            print(f"❌ Unexpected error sending email to {invite.email}: {str(e)}")
+            print(f"Unexpected error sending email to {invite.email}: {str(e)}")
             return {"success": False, "message": f"Unexpected error: {str(e)}"}
             
     except Exception as e:
         print(f"Email error: {str(e)}")
-        # Fallback to simulation mode
         print(f"=== EMAIL SIMULATION (Error Fallback) ===")
         print(f"To: {invite.email}")
         print(f"Subject: Interview Invitation: {invite.interview_title}")
@@ -376,7 +327,6 @@ def send_interview_invite_email(invite: InterviewInvite):
 
     
 
-# API endpoints
 @app.post("/send-interview-invite")
 async def send_interview_invite(invite: InterviewInvite):
     """Send interview invitation email"""
@@ -395,11 +345,19 @@ async def analyze_video_endpoint(video: VideoURL):
         if not result:
             return {"error": "Failed to analyze video", "details": "No result returned from analysis"}
 
-        # Store results in Supabase if user_id is provided
         if video.user_id and result:
             try:
                 if video.question_index is not None:
-                    # Store in the interview_answers table with question index
+                    print(f"\n{'='*50}")
+                    print(f"[analyze-video] INCOMING REQUEST DATA:")
+                    print(f"  video.user_id = {video.user_id}")
+                    print(f"  video.question_index = {video.question_index}")
+                    print(f"  video.question_text = {video.question_text}")
+                    print(f"  video.video_url = {video.video_url[:80]}...")
+                    print(f"  video (all fields) = {video.model_dump()}")
+                    print(f"{'='*50}\n")
+                    print
+                    
                     supabase.table('interview_answers').upsert({
                         'user_id': video.user_id,
                         'question_index': video.question_index,
@@ -445,13 +403,12 @@ def generate_personalized_questions_from_resume(resume_text: str, job_descriptio
             {"role": "system", "content": "You are an expert technical interviewer."},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=512,
+        max_completion_tokens=512,
         temperature=0.5
     )
     raw_content = response.choices[0].message.content.strip()
     print("Raw content in generate_personalized_questions_from_resume: ", raw_content)
 
-    # Remove markdown code block markers if present
     if raw_content.startswith('```json'):
         raw_content = raw_content[7:]
     if raw_content.startswith('```'):
@@ -460,7 +417,6 @@ def generate_personalized_questions_from_resume(resume_text: str, job_descriptio
         raw_content = raw_content[:-3]
     raw_content = raw_content.strip()
 
-    # Try to extract the first JSON array from the response
     json_array_match = re.search(r'(\[.*?\])', raw_content, re.DOTALL)
     if json_array_match:
         json_str = json_array_match.group(1)
@@ -469,14 +425,11 @@ def generate_personalized_questions_from_resume(resume_text: str, job_descriptio
 
     try:
         questions = json.loads(json_str)
-        # Validate format: should be a list of dicts with 'question' key
         if isinstance(questions, list) and all(isinstance(q, dict) and 'question' in q and isinstance(q['question'], str) and q['question'].strip() for q in questions):
             return questions[:num_questions]
-        # If it's a list of strings, convert
         if isinstance(questions, list) and all(isinstance(q, str) and q.strip() for q in questions):
             return [{"question": q} for q in questions[:num_questions]]
     except Exception:
-        # Fallback: try to extract questions from numbered or bulleted list
         questions = []
         for line in raw_content.split("\n"):
             line = line.strip()
@@ -487,7 +440,6 @@ def generate_personalized_questions_from_resume(resume_text: str, job_descriptio
                     questions.append({"question": q})
             elif line:
                 questions.append({"question": line})
-        # Filter out non-question artifacts
         questions = [q for q in questions if q["question"] and len(q["question"]) > 5]
         return questions[:num_questions]
     return []
@@ -553,7 +505,7 @@ async def recruiter_chat(req: RecruiterChatRequest):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": req.prompt},
             ],
-            max_tokens=250,
+            max_completion_tokens=250,
             temperature=0.3,
         )
         content = response.choices[0].message.content.strip()
@@ -569,7 +521,6 @@ async def health_check():
 @app.post("/upload-resume")
 async def upload_resume(file: UploadFile = File(...), user_id: str = Form(...)):
     """Upload resume file to Supabase storage"""
-    # Validate file type
     ACCEPTED_RESUME_TYPES = [
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -581,12 +532,10 @@ async def upload_resume(file: UploadFile = File(...), user_id: str = Form(...)):
     if file.content_type not in ACCEPTED_RESUME_TYPES:
         raise HTTPException(status_code=400, detail="Invalid file type. Only PDF, DOCX, and RTF are allowed.")
     
-    # Validate file size
     contents = await file.read()
     if len(contents) > MAX_RESUME_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=400, detail=f"File too large. Max size is {MAX_RESUME_SIZE_MB}MB.")
     
-    # Upload to Supabase Storage
     filename = f"{user_id}_{int(time.time())}_{file.filename}"
     try:
         storage_response = supabase.storage.from_('resumes').upload(filename, contents, {"content-type": file.content_type})
@@ -608,7 +557,6 @@ async def upload_resume(file: UploadFile = File(...), user_id: str = Form(...)):
     
     return {"success": True, "file_path": public_url, "filename": filename, "db_record": db_record}
 
-# Job Description Models
 class JobDescriptionUpdate(BaseModel):
     recruiter_id: str
     description: str
@@ -621,12 +569,10 @@ async def update_job_description(job_desc: JobDescriptionUpdate):
         
         existing = supabase.table('job_descriptions').select('id').eq('recruiter_id', job_desc.recruiter_id).execute()
         if existing.data and len(existing.data) > 0:
-            # Update existing job description
             result = supabase.table('job_descriptions').update({
                 "description": job_desc.description,
             }).eq('recruiter_id', job_desc.recruiter_id).execute()
         else:
-            # Create new job description
             result = supabase.table('job_descriptions').insert({
                 "recruiter_id": job_desc.recruiter_id,
                 "description": job_desc.description,
@@ -647,7 +593,6 @@ async def get_job_description(recruiter_id: str):
             return {"success": True, "description": result.data[0].get('description', '')}
         return {"success": True, "description": ""}
     except Exception as e:
-        # Provide clearer context in error for faster debugging on the client
         raise HTTPException(status_code=500, detail=f"Failed to fetch job description for {recruiter_id}: {str(e)}")
 
 @app.get("/get-job-description/me")
@@ -666,14 +611,6 @@ async def get_job_description_me(user_id: str = Depends(get_current_user_id)):
 async def manage_interview_invite(invite: InterviewInvite):
     """Manage interview invitation - update existing or create new"""
     try:
-        # Check if there's an existing invite for this email and interview
-        # First, we need to get the interview_id from the invite_code or other means
-        # For now, we'll assume the frontend sends the interview_id as well
-        
-        # This is a simplified version - in practice, you might want to pass interview_id
-        # or use a different approach to identify the specific interview
-        
-        # For now, let's just send the email and let the frontend handle the database logic
         return send_interview_invite_email(invite)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -682,10 +619,7 @@ async def manage_interview_invite(invite: InterviewInvite):
 async def cleanup_expired_invites():
     """Clean up expired interview invites (older than 30 days)"""
     try:
-        # Calculate date 30 days ago
         thirty_days_ago = datetime.now() - timedelta(days=30)
-        
-        # Update expired invites
         result = supabase.table('interview_invites').update({
             'status': 'expired'
         }).lt('created_at', thirty_days_ago.isoformat()).eq('status', 'pending').execute()
@@ -705,8 +639,6 @@ async def bulk_manage_invites(invites: list[InterviewInvite]):
         results = []
         
         for invite in invites:
-            # For each invite, we'll send the email
-            # The frontend will handle the database logic for duplicates
             email_result = send_interview_invite_email(invite)
             results.append({
                 "email": invite.email,
@@ -736,12 +668,8 @@ async def get_invite_status(invite_code: str):
         
         invite = result.data
         
-        # Check if invite is expired (older than 30 days)
-        invite_date = datetime.fromisoformat(invite['created_at'].replace('Z', '+00:00'))
-        thirty_days_ago = datetime.now() - timedelta(days=30)
-        
-        if invite_date < thirty_days_ago and invite['status'] == 'pending':
-            # Update status to expired
+        invite_date = datetime.fromisoformat(invite['created_at'].replace('Z', '+00:00'))        
+        if invite_date < datetime.now() - timedelta(days=30) and invite['status'] == 'pending':
             supabase.table('interview_invites').update({
                 'status': 'expired'
             }).eq('id', invite['id']).execute()
@@ -763,7 +691,6 @@ async def get_personalized_questions(request: GetPersonalizedQuestionsRequest):
     """Fetch the latest 3 personalized resume questions for a user"""
     try:
         user_id = request.user_id
-        # Query resume_questions for the latest 3 questions for the user
         result = supabase.table("resume_questions") \
             .select("question_index, question_text, created_at") \
             .eq("user_id", user_id) \
@@ -772,7 +699,6 @@ async def get_personalized_questions(request: GetPersonalizedQuestionsRequest):
             .limit(3) \
             .execute()
         questions = result.data if result and hasattr(result, 'data') and result.data else []
-        # Format for frontend: list of {"question": ...}
         formatted = [{"question": q["question_text"]} for q in sorted(questions, key=lambda x: x["question_index"])]
         return {"questions": formatted}
     except Exception as e:
