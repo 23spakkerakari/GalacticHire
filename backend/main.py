@@ -192,7 +192,6 @@ def detect_enthusiasm(audio_file: str, sr: int = 22050, energy_threshold: float 
 
     # Convert frame indices to timestamps
     timestamps = librosa.frames_to_time(enthusiastic_frames, sr=sr, hop_length=hop_length)
-    # Optionally, filter out timestamps that are close together
     filtered_timestamps = []
     prev = -999
     for t in timestamps:

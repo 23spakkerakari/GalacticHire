@@ -97,7 +97,6 @@ def generate_behavioral_insights(transcript, job_description):
         temperature=0.8
     )
     print("Behavioral Insights:", response.choices[0].message.content)
-    
     # Clean the response content to handle markdown formatting
     content = response.choices[0].message.content.strip()
     

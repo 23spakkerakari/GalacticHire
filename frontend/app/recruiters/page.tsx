@@ -67,7 +67,7 @@ export default function RecruitersPage() {
   const [newInterviewOpen, setNewInterviewOpen] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const { analysis, isAnalyzing, analyzeVideo, analyzeAnswer } = useVideoAnalysis();
-const [currentInterviewId, setCurrentInterviewId] = useState<string>("");
+const [currentInterviewId, setCurrentInterviewId] = useState<number | null>(null);
 
 const sendInvite = async () => {
   console.log("currentInterviewId: ", currentInterviewId);

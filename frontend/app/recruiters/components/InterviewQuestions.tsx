@@ -90,6 +90,22 @@ export default function InterviewQuestions({ recruiterId }: InterviewQuestionsPr
     setLoading(false);
   };
 
+  const deleteQuestion = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    const { error: deleteError } = await supabase
+      .from("interview_questions")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      setError(deleteError.message);
+    } else {
+      setQuestions((prev) => prev.filter((q) => q.id !== id));
+    }
+    setLoading(false);
+  };
+
   return (
     <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 shadow-xl mt-6">
       <div className="flex items-center justify-between mb-5">
@@ -129,7 +145,18 @@ export default function InterviewQuestions({ recruiterId }: InterviewQuestionsPr
                   <div className="mt-0.5 h-6 w-6 shrink-0 rounded-full bg-blue-600/20 text-blue-300 flex items-center justify-center text-xs font-semibold border border-blue-700/40">
                     {idx + 1}
                   </div>
-                  <p className="text-gray-200 leading-relaxed">{q.question}</p>
+                  <p className="text-gray-200 leading-relaxed flex-1">{q.question}</p>
+                  <button
+                    type="button"
+                    aria-label="Remove question"
+                    onClick={() => deleteQuestion(q.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-red-300 hover:text-red-200 p-1 rounded-md border border-red-500/40 bg-red-500/10"
+                    disabled={loading}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 8.586 5.707 4.293a1 1 0 0 0-1.414 1.414L8.586 10l-4.293 4.293a1 1 0 1 0 1.414 1.414L10 11.414l4.293 4.293a1 1 0 0 0 1.414-1.414L11.414 10l4.293-4.293a1 1 0 0 0-1.414-1.414L10 8.586Z" clipRule="evenodd" />
+                    </svg>
+                  </button>
                 </li>
               ))}
             </ol>
