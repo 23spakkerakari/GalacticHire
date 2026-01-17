@@ -132,6 +132,7 @@ class VideoURL(BaseModel):
     user_id: str = None
     question_index: int = None
     question_text: str = None
+    interview_id: str = None
 
 class ResumeText(BaseModel):
     resume_text: str
@@ -367,7 +368,8 @@ async def analyze_video_endpoint(video: VideoURL):
                         'transcript': result.get('transcript', ''),
                         'communication_analysis': json.dumps(result.get('communication_analysis', {})),
                         'behavioral_insights': json.dumps(result.get('behavioral_insights', {})),
-                        'created_at': datetime.now().isoformat()
+                        'created_at': datetime.now().isoformat(),
+                        'interview_id': video.interview_id
                     }).execute()
                     print(f"Analysis results stored for user {video.user_id}, question {video.question_index}")
             except Exception as e:
