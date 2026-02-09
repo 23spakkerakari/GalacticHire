@@ -2,12 +2,10 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/auth";
 
-interface Question {
+interface InterviewRow {
   id: string;
-  question: string;
-  order_index: number;
-  interview_id: string;
-  interview?: { recruiter_id: string };
+  title: string | null;
+  questions: any[] | null;
 }
 
 interface InterviewQuestionsProps {
@@ -18,10 +16,13 @@ interface InterviewQuestionsProps {
 export default function InterviewQuestions({ recruiterId, theme = "dark" }: InterviewQuestionsProps) {
   const supabase = createClient();
 
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [interviews, setInterviews] = useState<InterviewRow[]>([]);
+  const [selectedInterviewId, setSelectedInterviewId] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useObjectQuestions, setUseObjectQuestions] = useState(false);
 
   // Theme-aware classes
   const t = {
@@ -39,82 +40,99 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
     async function fetchQuestions() {
       setLoading(true);
       const { data, error } = await supabase
-        .from("interview_questions")
-        .select("*, interview:interview_id(recruiter_id)")
-        .order("order_index");
+        .from("interview")
+        .select("id, title, questions")
+        .eq("recruiter_id", recruiterId)
+        .order("created_at", { ascending: false });
       if (error) {
         setError(error.message);
       } else {
-        const filtered = (data || []).filter(q => q.interview && q.interview.recruiter_id === recruiterId);
-        setQuestions(filtered);
+        const rows = (data || []) as InterviewRow[];
+        setInterviews(rows);
+        if (rows.length > 0 && !selectedInterviewId) {
+          setSelectedInterviewId(rows[0].id);
+          const { list, usesObjects } = normalizeQuestions(rows[0].questions);
+          setQuestions(list);
+          setUseObjectQuestions(usesObjects);
+        }
       }
       setLoading(false);
     }
     if (recruiterId) fetchQuestions();
   }, [recruiterId]);
 
+  useEffect(() => {
+    if (!selectedInterviewId) return;
+    const row = interviews.find((i) => i.id === selectedInterviewId);
+    if (!row) return;
+    const { list, usesObjects } = normalizeQuestions(row.questions);
+    setQuestions(list);
+    setUseObjectQuestions(usesObjects);
+  }, [selectedInterviewId, interviews]);
+
+  const normalizeQuestions = (raw: any[] | null | undefined) => {
+    if (!Array.isArray(raw)) {
+      return { list: [] as string[], usesObjects: false };
+    }
+    if (raw.length > 0 && typeof raw[0] === "object" && raw[0] !== null && "question" in raw[0]) {
+      const list = raw
+        .map((q) => (q && typeof q.question === "string" ? q.question : ""))
+        .filter((q) => q.trim().length > 0);
+      return { list, usesObjects: true };
+    }
+    const list = raw
+      .map((q) => (typeof q === "string" ? q : ""))
+      .filter((q) => q.trim().length > 0);
+    return { list, usesObjects: false };
+  };
+
+  const persistQuestions = async (nextQuestions: string[]) => {
+    if (!selectedInterviewId) return;
+    const payload = useObjectQuestions
+      ? nextQuestions.map((q, idx) => ({ question: q, order_index: idx }))
+      : nextQuestions;
+
+    const { error: updateError } = await supabase
+      .from("interview")
+      .update({ questions: payload })
+      .eq("id", selectedInterviewId);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setInterviews((prev) =>
+      prev.map((row) =>
+        row.id === selectedInterviewId ? { ...row, questions: payload } : row
+      )
+    );
+  };
+
   const addQuestion = async () => {
     if (!newQuestion.trim()) return;
     setLoading(true);
     setError(null);
-    
-    let interviewId: string | null = null;
-    const { data: interviews, error: interviewError } = await supabase
-      .from("interview")
-      .select("id")
-      .eq("recruiter_id", recruiterId)
-      .limit(1);
-    
-    if (interviewError) {
-      setError(interviewError.message);
+
+    if (!selectedInterviewId) {
+      setError("Please select an interview first.");
       setLoading(false);
       return;
     }
-    
-    if (interviews && interviews.length > 0) {
-      interviewId = interviews[0].id;
-    } else {
-      const { data: newInterview, error: createError } = await supabase
-        .from("interview")
-        .insert({ recruiter_id: recruiterId, invite_code: Math.floor(Math.random() * 1000000000) })
-        .select()
-        .single();
-      if (createError) {
-        setError(createError.message);
-        setLoading(false);
-        return;
-      }
-      interviewId = newInterview.id;
-    }
-    
-    const { data: questionData, error: questionError } = await supabase
-      .from("interview_questions")
-      .insert([{ interview_id: interviewId, question: newQuestion }])
-      .select()
-      .single();
-    
-    if (questionError) {
-      setError(questionError.message);
-    } else if (questionData) {
-      setQuestions([...questions, questionData]);
-      setNewQuestion("");
-    }
+
+    const nextQuestions = [...questions, newQuestion.trim()];
+    await persistQuestions(nextQuestions);
+    setQuestions(nextQuestions);
+    setNewQuestion("");
     setLoading(false);
   };
 
-  const deleteQuestion = async (id: string) => {
+  const deleteQuestion = async (index: number) => {
     setLoading(true);
     setError(null);
-    const { error: deleteError } = await supabase
-      .from("interview_questions")
-      .delete()
-      .eq("id", id);
-
-    if (deleteError) {
-      setError(deleteError.message);
-    } else {
-      setQuestions((prev) => prev.filter((q) => q.id !== id));
-    }
+    const nextQuestions = questions.filter((_, idx) => idx !== index);
+    await persistQuestions(nextQuestions);
+    setQuestions(nextQuestions);
     setLoading(false);
   };
 
@@ -135,6 +153,24 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
         <span className={`px-2.5 py-1 rounded-md text-xs ${theme === "dark" ? "bg-slate-800/50 border border-slate-700/50 text-slate-400" : "bg-gray-100 border border-gray-200 text-gray-600"}`}>
           {questions.length} {questions.length === 1 ? "question" : "questions"}
         </span>
+      </div>
+
+      <div className="mb-4">
+        <label className={`block text-xs font-medium mb-2 ${t.textSecondary}`}>Interview</label>
+        <select
+          value={selectedInterviewId ?? ""}
+          onChange={(e) => setSelectedInterviewId(e.target.value)}
+          className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-blue-500/50 transition-colors ${t.inputBg} ${t.textPrimary}`}
+        >
+          <option value="" disabled>
+            {interviews.length > 0 ? "Select an interview" : "No interviews found"}
+          </option>
+          {interviews.map((interview) => (
+            <option key={interview.id} value={interview.id}>
+              {interview.title || "Untitled Interview"}
+            </option>
+          ))}
+        </select>
       </div>
 
       {loading && questions.length === 0 ? (
@@ -165,17 +201,17 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
             <div className="space-y-2 mb-5">
               {questions.map((q, idx) => (
                 <div
-                  key={q.id}
+                  key={`${q}-${idx}`}
                   className={`group flex items-start gap-3 p-3 rounded-lg border transition-colors ${t.innerBg}`}
                 >
                   <div className="w-6 h-6 shrink-0 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-xs font-medium text-blue-500">
                     {idx + 1}
                   </div>
-                  <p className={`flex-1 text-sm leading-relaxed pt-0.5 ${t.textSecondary}`}>{q.question}</p>
+                  <p className={`flex-1 text-sm leading-relaxed pt-0.5 ${t.textSecondary}`}>{q}</p>
                   <button
                     type="button"
                     aria-label="Remove question"
-                    onClick={() => deleteQuestion(q.id)}
+                    onClick={() => deleteQuestion(idx)}
                     className={`opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${t.textMuted} hover:text-red-500`}
                     disabled={loading}
                   >

@@ -1,10 +1,13 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { getBackendUrl } from "@/utils/env";
 
 // Mock types for demonstration
 interface Video {
+  id: string;
   title: string;
   url: string;
   candidate_details?: {
+    id: string;
     full_name: string;
     email: string;
     phone: string;
@@ -38,6 +41,12 @@ interface VideoAnalysisProps {
   isAnalyzing: boolean;
   onClose: () => void;
   onAnswerSelect: (answer: InterviewAnswer) => void;
+  recruiterId?: string;
+}
+
+interface ResumeHighlight {
+  text: string;
+  matches?: string[];
 }
 
 const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
@@ -47,15 +56,71 @@ const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
   isAnalyzing,
   onClose,
   onAnswerSelect,
+  recruiterId,
 }) => {
   const [selectedAnswerIndex, setSelectedAnswerIndex] = useState(0);
   const hasMultipleAnswers = candidateAnswers.length > 1;
   const currentAnswer = candidateAnswers[selectedAnswerIndex];
+  const [resumeHighlights, setResumeHighlights] = useState<ResumeHighlight[]>([]);
+  const [resumeHighlightsError, setResumeHighlightsError] = useState<string | null>(null);
+  const [isResumeHighlightsLoading, setIsResumeHighlightsLoading] = useState(false);
 
   const handleAnswerChange = (index: number) => {
     setSelectedAnswerIndex(index);
     onAnswerSelect(candidateAnswers[index]);
   };
+
+  useEffect(() => {
+    const candidateId = video.candidate_details?.id || video.id;
+    if (!candidateId || !recruiterId) {
+      setResumeHighlights([]);
+      setResumeHighlightsError("Missing recruiter or candidate ID.");
+      return;
+    }
+
+    let isCancelled = false;
+    const loadHighlights = async () => {
+      setIsResumeHighlightsLoading(true);
+      setResumeHighlightsError(null);
+      try {
+        const response = await fetch(`${getBackendUrl()}/resume-relevance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            candidate_id: candidateId,
+            recruiter_id: recruiterId,
+            max_items: 6,
+          }),
+        });
+        const data = await response.json();
+        if (isCancelled) return;
+        if (!response.ok) {
+          setResumeHighlights([]);
+          setResumeHighlightsError(data?.detail || data?.error || "Unable to load resume highlights.");
+          return;
+        }
+        if (data?.error) {
+          setResumeHighlights([]);
+          setResumeHighlightsError(data.error);
+          return;
+        }
+        setResumeHighlights(Array.isArray(data?.highlights) ? data.highlights : []);
+      } catch (error) {
+        if (isCancelled) return;
+        setResumeHighlights([]);
+        setResumeHighlightsError("Unable to load resume highlights.");
+      } finally {
+        if (!isCancelled) {
+          setIsResumeHighlightsLoading(false);
+        }
+      }
+    };
+
+    loadHighlights();
+    return () => {
+      isCancelled = true;
+    };
+  }, [video.id, video.candidate_details?.id, recruiterId]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-8">
@@ -125,6 +190,11 @@ const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
           {/* Left Column - Video & Candidate Info */}
           <div className="lg:col-span-4 space-y-6">
             <CandidateInfoColumn video={video} currentAnswer={currentAnswer} />
+            <ResumeRelevanceCard
+              highlights={resumeHighlights}
+              isLoading={isResumeHighlightsLoading}
+              error={resumeHighlightsError}
+            />
           </div>
 
           {/* Middle Column - Summary */}
@@ -215,6 +285,63 @@ const CandidateInfoColumn: React.FC<{
         </div>
       </div>
     </>
+  );
+};
+
+const ResumeRelevanceCard: React.FC<{
+  highlights: ResumeHighlight[];
+  isLoading: boolean;
+  error: string | null;
+}> = ({ highlights, isLoading, error }) => {
+  return (
+    <div className="group relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-900/50 to-slate-800/30 border border-slate-700/50 backdrop-blur-sm hover:border-slate-600/50 transition-all duration-300">
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 to-emerald-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+      <div className="relative p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <h3 className="text-sm font-medium text-white">Resume Highlights</h3>
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-3">
+            <div className="h-4 bg-slate-700/30 rounded-full animate-pulse"></div>
+            <div className="h-4 bg-slate-700/30 rounded-full animate-pulse w-5/6"></div>
+            <div className="h-4 bg-slate-700/30 rounded-full animate-pulse w-4/6"></div>
+          </div>
+        ) : error ? (
+          <div className="text-sm text-slate-400 text-center py-6">{error}</div>
+        ) : highlights.length > 0 ? (
+          <div className="space-y-3">
+            {highlights.map((highlight, index) => (
+              <div
+                key={`${highlight.text}-${index}`}
+                className="p-4 rounded-xl bg-slate-800/30 border border-slate-700/30"
+              >
+                <p className="text-sm text-slate-200 leading-relaxed">{highlight.text}</p>
+                {highlight.matches && highlight.matches.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {highlight.matches.map((match) => (
+                      <span
+                        key={`${highlight.text}-${match}`}
+                        className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-xs border border-emerald-500/20"
+                      >
+                        {match}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-slate-400 text-center py-6">
+            No relevant resume highlights found
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -415,9 +542,11 @@ const CommunicationAssessment: React.FC<{
 // Demo Component
 export function VideoAnalysisDemo() {
   const mockVideo: Video = {
+    id: "mock-candidate-1",
     title: "Senior Software Engineer Interview",
     url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
     candidate_details: {
+      id: "mock-candidate-1",
       full_name: "Sarah Anderson",
       email: "sarah.anderson@email.com",
       phone: "+1 (555) 123-4567",

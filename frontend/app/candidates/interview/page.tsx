@@ -63,7 +63,7 @@ export default function InterviewSession() {
   // Fetch generic questions from Supabase
   const fetchGenericQuestions = async () => {
     const { data, error } = await supabase
-      .from("interview_questions")
+      .from("interview")
       .select("question");
     if (error) {
       console.error("Error retrieving questions from supabase");

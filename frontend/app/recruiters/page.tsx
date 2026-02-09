@@ -588,6 +588,7 @@ const handleCloseAnalysis = () => {
           isAnalyzing={isAnalyzing}
           onClose={handleCloseAnalysis}
           onAnswerSelect={handleAnswerSelect}
+          recruiterId={currentUserId}
         />
       ) : (
         <Dashboard

@@ -1,0 +1,9 @@
+{
+  "venvPath": "C:\\Users\\pradh\\AppData\\Local\\Programs\\Python",
+  "venv": "Python311",
+  "extraPaths": [
+    ".",
+    "C:\\Users\\pradh\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages"
+  ],
+  "typeCheckingMode": "basic"
+}

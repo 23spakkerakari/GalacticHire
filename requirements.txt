@@ -1,0 +1,6 @@
+librosa
+numpy
+python-dotenv
+requests
+torch
+transformers

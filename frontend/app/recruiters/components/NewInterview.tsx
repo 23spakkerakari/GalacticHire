@@ -128,6 +128,7 @@ export default function NewInterview({ onClose, recruiterId, companyNumber, onCr
           title: interviewTitle,
           description: interviewDescription,
           invite_code: interviewInviteCode,
+          questions: questions.map((q) => q.question),
         })
         .select()
         .single();
@@ -141,24 +142,6 @@ export default function NewInterview({ onClose, recruiterId, companyNumber, onCr
 
       // Notify parent about created interview (expose id)
       onCreated({ id: interview.id });
-
-      // Insert questions (use order_index)
-      const questionsToInsert = questions.map(q => ({
-        interview_id: interview.id,
-        question: q.question,
-        order_index: q.order,
-      }));
-
-      const { error: questionsError } = await supabase
-        .from("interview_questions")
-        .insert(questionsToInsert);
-
-      if (questionsError) {
-        console.error("Questions insert error:", questionsError);
-        setMessage({ type: "error", text: questionsError.message || "Failed to add questions." });
-        setIsLoading(false);
-        return;
-      }
 
       // Send invites to candidates (each with their own invite_code)
         const invitePromises = inviteEmails.map(async (email) => {

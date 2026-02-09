@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+import io
+import re
 import assemblyai as aai  
 from supabase import create_client, Client
 from openai import OpenAI
@@ -148,6 +150,11 @@ class RecruiterChatRequest(BaseModel):
     prompt: str
     recruiter_id: str | None = None
 
+class ResumeRelevanceRequest(BaseModel):
+    candidate_id: str
+    recruiter_id: str
+    max_items: int | None = 6
+
 def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
     prompt = (
         f"Extract {num_themes} main themes from the following transcript. "
@@ -164,6 +171,53 @@ def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
     raw_themes = response.choices[0].text.strip()
     themes = [theme.strip() for theme in raw_themes.split(",") if theme.strip()]
     return themes[:num_themes]
+
+def extract_resume_text_from_pdf_url(pdf_url: str) -> str:
+    response = requests.get(pdf_url, timeout=20)
+    response.raise_for_status()
+    with pdfplumber.open(io.BytesIO(response.content)) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+def extract_relevant_resume_lines(resume_text: str, job_description: str, max_items: int = 6) -> list:
+    if not resume_text or not job_description:
+        return []
+
+    stop_words = nlp.Defaults.stop_words
+    job_tokens = re.findall(r"[A-Za-z0-9+#.\-]{2,}", job_description.lower())
+    keywords = {
+        token for token in job_tokens
+        if token not in stop_words and len(token) > 2
+    }
+    if not keywords:
+        return []
+
+    lines = [line.strip() for line in resume_text.splitlines()]
+    scored = []
+    for line in lines:
+        if len(line) < 5 or len(line) > 220:
+            continue
+        tokens = re.findall(r"[A-Za-z0-9+#.\-]{2,}", line.lower())
+        if not tokens:
+            continue
+        matched = [token for token in tokens if token in keywords]
+        if not matched:
+            continue
+        unique_matches = sorted(set(matched))
+        is_bullet = line.lstrip().startswith(("-", "•", "*", "·", "▪", "–"))
+        score = len(unique_matches) * 2 + len(matched) + (1 if is_bullet else 0)
+        scored.append((score, line, unique_matches))
+
+    scored.sort(key=lambda item: (-item[0], len(item[1])))
+    seen = set()
+    highlights = []
+    for _, line, matches in scored:
+        if line in seen:
+            continue
+        seen.add(line)
+        highlights.append({"text": line, "matches": matches[:8]})
+        if len(highlights) >= max_items:
+            break
+    return highlights
 
 def extract_audio_from_video(video_url: str, output_audio: str) -> None:
     """
@@ -495,6 +549,42 @@ async def generate_resume_questions_from_db(request: ResumeQuestionsRequest):
     except Exception as e:
         print(f"Error in generate_resume_questions_from_db: {str(e)}")
         return {"error": str(e)}
+
+@app.post("/resume-relevance")
+async def resume_relevance(request: ResumeRelevanceRequest):
+    try:
+        job_result = supabase.table("job_descriptions") \
+            .select("description") \
+            .eq("recruiter_id", request.recruiter_id) \
+            .limit(1) \
+            .execute()
+        job_desc = job_result.data[0]["description"] if job_result.data else ""
+        if not job_desc:
+            return {"highlights": [], "error": "No job description found."}
+
+        resume_result = supabase.table("resumes") \
+            .select("file_path, original_name, uploaded_at") \
+            .eq("user_id", request.candidate_id) \
+            .order("uploaded_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if not resume_result.data:
+            return {"highlights": [], "error": "No resume found for this candidate."}
+
+        resume = resume_result.data[0]
+        file_path = resume.get("file_path") or ""
+        if not file_path.lower().endswith(".pdf"):
+            return {"highlights": [], "error": "Unsupported resume format. Please upload a PDF."}
+
+        resume_text = extract_resume_text_from_pdf_url(file_path)
+        if not resume_text.strip():
+            return {"highlights": [], "error": "Could not extract resume text."}
+
+        max_items = request.max_items or 6
+        highlights = extract_relevant_resume_lines(resume_text, job_desc, max_items=max_items)
+        return {"highlights": highlights}
+    except Exception as e:
+        return {"highlights": [], "error": str(e)}
 
 @app.post("/recruiter-chat")
 async def recruiter_chat(req: RecruiterChatRequest):
