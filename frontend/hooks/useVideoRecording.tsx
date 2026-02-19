@@ -24,11 +24,40 @@ export function useVideoRecording(
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true,
-        audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
+      const buildConstraints = (mode: "exact" | "ideal" | "default") => ({
+        video:
+          mode === "default"
+            ? true
+            : videoDeviceId
+              ? { deviceId: { [mode]: videoDeviceId } }
+              : true,
+        audio:
+          mode === "default"
+            ? true
+            : audioDeviceId
+              ? { deviceId: { [mode]: audioDeviceId } }
+              : true,
       });
 
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(buildConstraints("exact"));
+      } catch (error) {
+        const name = error instanceof Error ? error.name : "";
+        if (name === "NotFoundError" || name === "OverconstrainedError") {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(buildConstraints("ideal"));
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia(buildConstraints("default"));
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      if (!stream) {
+        throw new Error("Unable to initialize camera.");
+      }
       streamRef.current = stream;
       console.log("Audio tracks:", stream.getAudioTracks());
       if (stream.getAudioTracks().length === 0) {

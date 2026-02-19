@@ -1,12 +1,11 @@
 "use client";
 import { useState, useEffect, Suspense, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { createClient } from "@/utils/auth";
 import { useProfile } from "@/hooks/useProfile";
 import { ProfileForm } from "./components/ProfileForm";
 import { useCandidateOnboardingStep } from "@/hooks/useCandidateOnboardingStep";
-import AddInterviewModal from "./components/AddInterviewModal";
 import InterviewDetailsModal from "./dashboard/components/InterviewDetailsModal";
 import Link from "next/link";
 
@@ -51,18 +50,14 @@ export default function CandidateDashboard() {
   const [activeTab, setActiveTab] = useState<"pending" | "completed" | "stats">("pending");
   const [completed, setCompleted] = useState<InterviewParticipant[]>([]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
-  const [addInterviewOpen, setAddInterviewOpen] = useState(false);
   const [pendingInterviews, setPendingInterviews] = useState<PendingInterview[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
 
   const supabase = createClient();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { isLoading, showProfileForm, profileData, updateProfile } = useProfile();
+  const { isLoading, showProfileForm, profileData, userEmail, updateProfile } = useProfile();
   const { loading, step, redirectIfNeeded } = useCandidateOnboardingStep();
-
-  const interviewCode = searchParams.get("code");
 
   // Theme management
   useEffect(() => {
@@ -179,37 +174,11 @@ export default function CandidateDashboard() {
     redirectIfNeeded("dashboard");
   }, [loading, step, redirectIfNeeded]);
 
-  // Auto-open AddInterviewModal if code is in URL
-  useEffect(() => {
-    if (interviewCode && !addInterviewOpen) {
-      setAddInterviewOpen(true);
-    }
-  }, [interviewCode, addInterviewOpen]);
-
   // Refresh dashboard
   const refreshDashboard = useCallback(() => {
     fetchCompletedInterviews();
     fetchPendingInterviews();
   }, [fetchCompletedInterviews, fetchPendingInterviews]);
-
-  // Handle new interview
-  const handleInterviewSuccess = useCallback(
-    (newInterview: Interview | null) => {
-      if (newInterview) {
-        const newPendingInterview: PendingInterview = {
-          id: newInterview.id,
-          title: newInterview.title || "Interview",
-          scheduledDate: newInterview.scheduled_date || "TBD",
-          company: newInterview.company || "Unknown",
-          logo: (newInterview.company || "?").charAt(0).toUpperCase(),
-        };
-        setPendingInterviews((prev) => [newPendingInterview, ...prev]);
-      } else {
-        refreshDashboard();
-      }
-    },
-    [refreshDashboard]
-  );
 
   // Logout
   const handleLogout = async () => {
@@ -281,13 +250,6 @@ export default function CandidateDashboard() {
                   )}
                 </button>
 
-                <button onClick={() => setAddInterviewOpen(true)} className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Interview
-                </button>
-
                 {/* Profile dropdown */}
                 <div className="relative group">
                   <button className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border transition-colors ${theme === "dark" ? "bg-slate-800/50 border-slate-700/50 hover:bg-slate-800" : "bg-gray-100 border-gray-200 hover:bg-gray-200"}`}>
@@ -302,7 +264,7 @@ export default function CandidateDashboard() {
                   <div className={`absolute right-0 mt-2 w-48 py-1 rounded-lg border shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all ${t.dropdownBg}`}>
                     <div className={`px-4 py-2 border-b ${theme === "dark" ? "border-slate-800" : "border-gray-200"}`}>
                       <p className={`text-sm font-medium ${t.textPrimary}`}>{profileData?.full_name || "Candidate"}</p>
-                      <p className={`text-xs ${t.textSecondary}`}>{profileData?.email || ""}</p>
+                      <p className={`text-xs ${t.textSecondary}`}>{userEmail || ""}</p>
                     </div>
                     <Link href="/" className={`flex items-center gap-2 px-4 py-2 text-sm transition-colors ${theme === "dark" ? "text-slate-300 hover:text-white hover:bg-slate-800/50" : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"}`}>
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -359,16 +321,6 @@ export default function CandidateDashboard() {
             <StatCard value={Math.round((completed.length / (pendingInterviews.length + completed.length || 1)) * 100)} label="% Complete" color="indigo" theme={theme} />
           </div>
 
-          {/* Mobile Add Button */}
-          <div className="sm:hidden mb-6">
-            <button onClick={() => setAddInterviewOpen(true)} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Interview
-            </button>
-          </div>
-
           {/* Tab Content */}
           {activeTab === "pending" && <PendingInterviewsSection interviews={pendingInterviews} theme={theme} t={t} />}
 
@@ -380,7 +332,6 @@ export default function CandidateDashboard() {
         {/* Modals */}
         {openIdx !== null && completed[openIdx] && <InterviewDetailsModal interview={completed[openIdx]} onClose={() => setOpenIdx(null)} />}
 
-        {addInterviewOpen && <AddInterviewModal onClose={() => setAddInterviewOpen(false)} onSuccess={handleInterviewSuccess} initialCode={interviewCode || undefined} />}
       </div>
     </Suspense>
   );

@@ -47,6 +47,21 @@ interface VideoAnalysisProps {
 interface ResumeHighlight {
   text: string;
   matches?: string[];
+  score?: number;
+  evidence?: string;
+}
+
+interface RequirementMatch {
+  experience: string;
+  bi_score?: number;
+  cross_score?: number;
+  rationale?: string;
+  matched_skills?: string[];
+}
+
+interface RequirementEvidence {
+  requirement: string;
+  matches: RequirementMatch[];
 }
 
 const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
@@ -64,6 +79,8 @@ const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
   const [resumeHighlights, setResumeHighlights] = useState<ResumeHighlight[]>([]);
   const [resumeHighlightsError, setResumeHighlightsError] = useState<string | null>(null);
   const [isResumeHighlightsLoading, setIsResumeHighlightsLoading] = useState(false);
+  const [overallMatchScore, setOverallMatchScore] = useState<number | null>(null);
+  const [requirementEvidence, setRequirementEvidence] = useState<RequirementEvidence[]>([]);
 
   const handleAnswerChange = (index: number) => {
     setSelectedAnswerIndex(index);
@@ -97,18 +114,26 @@ const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
         if (!response.ok) {
           setResumeHighlights([]);
           setResumeHighlightsError(data?.detail || data?.error || "Unable to load resume highlights.");
+          setOverallMatchScore(null);
+          setRequirementEvidence([]);
           return;
         }
         if (data?.error) {
           setResumeHighlights([]);
           setResumeHighlightsError(data.error);
+          setOverallMatchScore(null);
+          setRequirementEvidence([]);
           return;
         }
         setResumeHighlights(Array.isArray(data?.highlights) ? data.highlights : []);
+        setOverallMatchScore(typeof data?.overall_match_score === "number" ? data.overall_match_score : null);
+        setRequirementEvidence(Array.isArray(data?.requirements) ? data.requirements : []);
       } catch (error) {
         if (isCancelled) return;
         setResumeHighlights([]);
         setResumeHighlightsError("Unable to load resume highlights.");
+        setOverallMatchScore(null);
+        setRequirementEvidence([]);
       } finally {
         if (!isCancelled) {
           setIsResumeHighlightsLoading(false);
@@ -194,6 +219,8 @@ const VideoAnalysis: React.FC<VideoAnalysisProps> = ({
               highlights={resumeHighlights}
               isLoading={isResumeHighlightsLoading}
               error={resumeHighlightsError}
+              overallScore={overallMatchScore}
+              requirementEvidence={requirementEvidence}
             />
           </div>
 
@@ -292,7 +319,9 @@ const ResumeRelevanceCard: React.FC<{
   highlights: ResumeHighlight[];
   isLoading: boolean;
   error: string | null;
-}> = ({ highlights, isLoading, error }) => {
+  overallScore: number | null;
+  requirementEvidence: RequirementEvidence[];
+}> = ({ highlights, isLoading, error, overallScore, requirementEvidence }) => {
   return (
     <div className="group relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-900/50 to-slate-800/30 border border-slate-700/50 backdrop-blur-sm hover:border-slate-600/50 transition-all duration-300">
       <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 to-emerald-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -314,12 +343,21 @@ const ResumeRelevanceCard: React.FC<{
           <div className="text-sm text-slate-400 text-center py-6">{error}</div>
         ) : highlights.length > 0 ? (
           <div className="space-y-3">
+            {typeof overallScore === "number" && (
+              <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                <div className="text-xs text-emerald-300 mb-1">Overall Match</div>
+                <div className="text-2xl font-semibold text-emerald-200">{overallScore}%</div>
+              </div>
+            )}
             {highlights.map((highlight, index) => (
               <div
                 key={`${highlight.text}-${index}`}
                 className="p-4 rounded-xl bg-slate-800/30 border border-slate-700/30"
               >
                 <p className="text-sm text-slate-200 leading-relaxed">{highlight.text}</p>
+                {highlight.evidence && (
+                  <p className="text-xs text-slate-400 mt-2">{highlight.evidence}</p>
+                )}
                 {highlight.matches && highlight.matches.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {highlight.matches.map((match) => (
@@ -334,6 +372,39 @@ const ResumeRelevanceCard: React.FC<{
                 )}
               </div>
             ))}
+            {requirementEvidence.length > 0 && (
+              <div className="pt-2 space-y-3">
+                <div className="text-xs text-slate-400 uppercase tracking-wide">Requirement Evidence</div>
+                {requirementEvidence.slice(0, 3).map((req, reqIndex) => (
+                  <div key={`${req.requirement}-${reqIndex}`} className="p-4 rounded-xl bg-slate-900/30 border border-slate-700/30">
+                    <div className="text-sm text-slate-200 font-medium">{req.requirement}</div>
+                    {req.matches?.length ? (
+                      <div className="mt-3 space-y-2">
+                        {req.matches.slice(0, 2).map((match, matchIndex) => (
+                          <div key={`${req.requirement}-${matchIndex}`} className="text-xs text-slate-300">
+                            <div className="text-slate-200">{match.experience}</div>
+                            {match.rationale && (
+                              <div className="text-slate-400 mt-1">{match.rationale}</div>
+                            )}
+                            {match.matched_skills && match.matched_skills.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {match.matched_skills.slice(0, 5).map((skill) => (
+                                  <span key={`${req.requirement}-${skill}`} className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 text-[10px] border border-blue-500/20">
+                                    {skill}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-400 mt-2">No strong evidence found.</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-sm text-slate-400 text-center py-6">

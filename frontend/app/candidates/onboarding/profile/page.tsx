@@ -40,18 +40,18 @@ export default function OnboardingProfilePage() {
                     return;
                 }
             }
-            // Update profile
+            // Upsert profile (creates row if missing, updates if exists)
             const { error: updateError } = await supabase
                 .from("profiles")
-                .update({ ...form, updated_at: new Date().toISOString() })
-                .eq("id", user.id);
+                .upsert({ id: user.id, ...form, updated_at: new Date().toISOString() });
             if (updateError) {
                 setError("Failed to save profile. Please try again.");
                 setLoading(false);
                 return;
             }
             setSuccess(true);
-            setTimeout(() => router.push("/candidates/upload-resume"), 1000);
+            // Brief delay so Supabase propagates before next page fetches
+            setTimeout(() => router.push("/candidates/upload-resume"), 1500);
         } catch (err) {
             setError("Unexpected error. Please try again.");
         } finally {

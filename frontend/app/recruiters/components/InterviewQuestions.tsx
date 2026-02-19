@@ -88,13 +88,10 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
 
   const persistQuestions = async (nextQuestions: string[]) => {
     if (!selectedInterviewId) return;
-    const payload = useObjectQuestions
-      ? nextQuestions.map((q, idx) => ({ question: q, order_index: idx }))
-      : nextQuestions;
 
     const { error: updateError } = await supabase
       .from("interview")
-      .update({ questions: payload })
+      .update({ questions: nextQuestions })
       .eq("id", selectedInterviewId);
 
     if (updateError) {
@@ -102,9 +99,10 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
       return;
     }
 
+    console.log("Questions updated", nextQuestions);
     setInterviews((prev) =>
       prev.map((row) =>
-        row.id === selectedInterviewId ? { ...row, questions: payload } : row
+        row.id === selectedInterviewId ? { ...row, questions: nextQuestions } : row
       )
     );
   };
@@ -125,6 +123,8 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
     setQuestions(nextQuestions);
     setNewQuestion("");
     setLoading(false);
+
+    console.log("Question successfully added", nextQuestions);
   };
 
   const deleteQuestion = async (index: number) => {

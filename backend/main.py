@@ -7,6 +7,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import time
+import math
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -26,6 +27,7 @@ import pdfplumber
 
 load_dotenv()
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLY")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
@@ -155,6 +157,10 @@ class ResumeRelevanceRequest(BaseModel):
     recruiter_id: str
     max_items: int | None = 6
 
+class ResumeQualityRequest(BaseModel):
+    candidate_id: str | None = None
+    resume_text: str | None = None
+
 def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
     prompt = (
         f"Extract {num_themes} main themes from the following transcript. "
@@ -218,6 +224,339 @@ def extract_relevant_resume_lines(resume_text: str, job_description: str, max_it
         if len(highlights) >= max_items:
             break
     return highlights
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+def _extract_keywords(text: str, max_items: int = 8) -> list:
+    if not text:
+        return []
+    stop_words = nlp.Defaults.stop_words
+    tokens = re.findall(r"[A-Za-z0-9+#.\-]{2,}", text.lower())
+    keywords = []
+    seen = set()
+    for token in tokens:
+        if token in stop_words or len(token) < 3:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        keywords.append(token)
+        if len(keywords) >= max_items:
+            break
+    return keywords
+
+def chunk_resume_experiences(resume_text: str, max_chunks: int = 60) -> list:
+    if not resume_text:
+        return []
+    lines = [line.strip() for line in resume_text.splitlines() if line.strip()]
+    bullet_re = re.compile(r"^[-•*·▪–]\s+(.*)")
+    header_buffer: list[str] = []
+    chunks = []
+    for line in lines:
+        bullet_match = bullet_re.match(line)
+        if bullet_match:
+            bullet = bullet_match.group(1).strip()
+            if len(bullet) < 4:
+                continue
+            context = " | ".join(header_buffer[-2:]) if header_buffer else ""
+            text = f"{context} - {bullet}" if context else bullet
+            chunks.append({"text": _normalize_whitespace(text), "context": context, "source": "bullet"})
+            continue
+
+        header_buffer.append(line)
+        if len(header_buffer) > 3:
+            header_buffer = header_buffer[-3:]
+
+        looks_like_role = bool(re.search(r"\b(Engineer|Developer|Manager|Analyst|Designer|Intern|Lead|Director)\b", line, re.IGNORECASE))
+        has_dates = bool(re.search(r"\b(20\d{2}|19\d{2})\b", line))
+        if looks_like_role or has_dates:
+            chunks.append({"text": _normalize_whitespace(line), "context": line, "source": "header"})
+
+    seen = set()
+    deduped = []
+    for chunk in chunks:
+        text = chunk["text"]
+        if not text or len(text) < 5:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        deduped.append(chunk)
+        if len(deduped) >= max_chunks:
+            break
+    return deduped
+
+def chunk_job_requirements(job_description: str, max_requirements: int = 30) -> list:
+    if not job_description:
+        return []
+    lines = [line.strip() for line in job_description.splitlines() if line.strip()]
+    bullet_re = re.compile(r"^[-•*·▪–]\s+(.*)")
+    requirements = []
+    active_section = ""
+    for line in lines:
+        if line.endswith(":") and len(line) < 60:
+            active_section = line[:-1].strip()
+            continue
+        bullet_match = bullet_re.match(line)
+        if bullet_match:
+            req = bullet_match.group(1).strip()
+            if active_section:
+                req = f"{active_section}: {req}"
+            requirements.append(req)
+            continue
+
+        if active_section and len(line) > 20:
+            requirements.append(f"{active_section}: {line}")
+            continue
+
+        if re.search(r"\b(must|should|required|responsibilities|requirements|qualifications)\b", line, re.IGNORECASE):
+            for part in re.split(r"[.;•]", line):
+                cleaned = part.strip()
+                if cleaned:
+                    requirements.append(cleaned)
+
+    normalized = []
+    seen = set()
+    for req in requirements:
+        cleaned = _normalize_whitespace(req)
+        if cleaned and cleaned not in seen:
+            normalized.append(cleaned)
+            seen.add(cleaned)
+            if len(normalized) >= max_requirements:
+                break
+    return normalized
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+def _embed_texts(texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=texts,
+    )
+    return [item.embedding for item in response.data]
+
+def _cross_encoder_rerank(requirement: str, experiences: list[dict]) -> list[dict]:
+    if not requirement or not experiences:
+        return []
+    prompt_lines = [
+        "You are evaluating resume evidence for a job requirement.",
+        "For each experience, score how well it provides evidence for the requirement.",
+        "Return ONLY valid JSON as an array of objects with:",
+        '  {"experience_id": <int>, "score": <0-100>, "rationale": <short sentence>, "matched_skills": [..] }',
+        "",
+        f"Requirement: {requirement}",
+        "",
+        "Experiences:"
+    ]
+    for idx, exp in enumerate(experiences):
+        prompt_lines.append(f"{idx}: {exp['text']}")
+    prompt = "\n".join(prompt_lines)
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": "You are a strict JSON formatter."},
+                {"role": "user", "content": prompt},
+            ],
+            max_completion_tokens=320,
+            temperature=0.2,
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`").replace("json", "").strip()
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            cleaned = []
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                cleaned.append({
+                    "experience_id": int(item.get("experience_id", 0)),
+                    "score": float(item.get("score", 0)),
+                    "rationale": str(item.get("rationale", "")).strip(),
+                    "matched_skills": item.get("matched_skills", []) if isinstance(item.get("matched_skills", []), list) else [],
+                })
+            return cleaned
+    except Exception as e:
+        print(f"Cross-encoder rerank error: {str(e)}")
+    return []
+
+def smart_resume_jd_match(resume_text: str, job_description: str, max_items: int = 6) -> dict:
+    if not resume_text or not job_description:
+        return {"highlights": [], "requirements": [], "overall_match_score": 0, "error": "Missing resume or job description."}
+
+    experiences = chunk_resume_experiences(resume_text, max_chunks=60)
+    requirements = chunk_job_requirements(job_description, max_requirements=25)
+    if not experiences or not requirements:
+        return {"highlights": [], "requirements": [], "overall_match_score": 0, "error": "Unable to parse resume or job description."}
+
+    try:
+        req_embeddings = _embed_texts([r for r in requirements])
+        exp_embeddings = _embed_texts([e["text"] for e in experiences])
+    except Exception as e:
+        print(f"Embedding error: {str(e)}")
+        return {"highlights": extract_relevant_resume_lines(resume_text, job_description, max_items=max_items), "requirements": [], "overall_match_score": 0, "error": "Embedding step failed."}
+
+    requirement_matches = []
+    overall_scores = []
+    for idx, req in enumerate(requirements):
+        if idx >= len(req_embeddings):
+            continue
+        similarities = []
+        for exp_idx, exp in enumerate(experiences):
+            if exp_idx >= len(exp_embeddings):
+                continue
+            sim = _cosine_similarity(req_embeddings[idx], exp_embeddings[exp_idx])
+            similarities.append((sim, exp_idx, exp))
+        similarities.sort(key=lambda x: x[0], reverse=True)
+        top_candidates = [item for item in similarities[:4]]
+        candidate_payload = [{"text": exp["text"]} for _, _, exp in top_candidates]
+        reranked = _cross_encoder_rerank(req, candidate_payload) if candidate_payload else []
+
+        matches = []
+        for item in reranked:
+            exp_id = item.get("experience_id", 0)
+            if exp_id < 0 or exp_id >= len(candidate_payload):
+                continue
+            exp_text = candidate_payload[exp_id]["text"]
+            matches.append({
+                "experience": exp_text,
+                "bi_score": float(top_candidates[exp_id][0]) if exp_id < len(top_candidates) else 0,
+                "cross_score": float(item.get("score", 0)),
+                "rationale": item.get("rationale", ""),
+                "matched_skills": item.get("matched_skills", []),
+            })
+        matches.sort(key=lambda x: x["cross_score"], reverse=True)
+        top_match_score = matches[0]["cross_score"] if matches else 0
+        if top_match_score:
+            overall_scores.append(top_match_score)
+        requirement_matches.append({
+            "requirement": req,
+            "matches": matches[:3],
+        })
+
+    overall_match_score = int(sum(overall_scores) / max(1, len(overall_scores))) if overall_scores else 0
+
+    highlights = []
+    flat_matches = []
+    for req in requirement_matches:
+        for match in req["matches"]:
+            flat_matches.append((match["cross_score"], req["requirement"], match))
+    flat_matches.sort(key=lambda x: x[0], reverse=True)
+    for score, req_text, match in flat_matches[:max_items]:
+        highlights.append({
+            "text": match["experience"],
+            "matches": _extract_keywords(req_text, max_items=6),
+            "score": score,
+            "evidence": match.get("rationale", ""),
+        })
+
+    return {
+        "highlights": highlights,
+        "requirements": requirement_matches,
+        "overall_match_score": overall_match_score,
+    }
+
+def score_resume_quality(resume_text: str) -> dict:
+    words = re.findall(r"\b\w+\b", resume_text or "")
+    word_count = len(words)
+    lines = [line.strip() for line in (resume_text or "").splitlines() if line.strip()]
+    bullet_count = sum(1 for line in lines if re.match(r"^[-•*·▪–]\s+", line))
+    quantified_count = len(re.findall(r"\b\d+%|\$\d+|\b\d+(?:\.\d+)?\s*(?:k|K|m|M)\b", resume_text))
+    email_present = bool(re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", resume_text))
+    phone_present = bool(re.search(r"(\+?\d{1,3})?[\s\-.(]*\d{3}[\s\-.)]*\d{3}[\s\-.)]*\d{4}", resume_text))
+    linkedin_present = bool(re.search(r"linkedin\.com/in/", resume_text, re.IGNORECASE))
+
+    section_headings = {
+        "experience": bool(re.search(r"\b(experience|employment|work history)\b", resume_text, re.IGNORECASE)),
+        "education": bool(re.search(r"\b(education|degree|university|college)\b", resume_text, re.IGNORECASE)),
+        "skills": bool(re.search(r"\b(skills|technologies|technical skills)\b", resume_text, re.IGNORECASE)),
+        "projects": bool(re.search(r"\b(projects|project experience)\b", resume_text, re.IGNORECASE)),
+        "summary": bool(re.search(r"\b(summary|profile|objective)\b", resume_text, re.IGNORECASE)),
+    }
+
+    action_verbs = [
+        "led", "built", "designed", "developed", "implemented", "optimized", "improved",
+        "managed", "owned", "delivered", "launched", "created", "analyzed", "automated",
+    ]
+    action_verb_hits = 0
+    for line in lines:
+        for verb in action_verbs:
+            if re.match(rf"^[-•*·▪–]?\s*{verb}\b", line, re.IGNORECASE):
+                action_verb_hits += 1
+                break
+
+    sentences = re.split(r"[.!?]", resume_text or "")
+    sentence_lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences if s.strip()]
+    avg_sentence_len = int(sum(sentence_lengths) / max(1, len(sentence_lengths)))
+
+    structure_score = 0
+    structure_score += 20 if email_present else 0
+    structure_score += 15 if phone_present else 0
+    structure_score += 10 if linkedin_present else 0
+    structure_score += 10 if section_headings["summary"] else 0
+    structure_score += 15 if section_headings["experience"] else 0
+    structure_score += 15 if section_headings["education"] else 0
+    structure_score += 15 if section_headings["skills"] else 0
+    structure_score = min(structure_score, 100)
+
+    content_score = 0
+    content_score += min(40, quantified_count * 8)
+    content_score += min(30, action_verb_hits * 3)
+    content_score += 15 if section_headings["projects"] else 0
+    content_score += 15 if word_count >= 250 else max(0, int(word_count / 250 * 15))
+    content_score = min(content_score, 100)
+
+    formatting_score = 0
+    formatting_score += min(40, bullet_count * 3)
+    formatting_score += 20 if 300 <= word_count <= 1200 else 10 if 200 <= word_count <= 1500 else 0
+    formatting_score += 20 if avg_sentence_len <= 26 else 10 if avg_sentence_len <= 32 else 0
+    formatting_score += 20 if len(lines) >= 12 else 10 if len(lines) >= 8 else 0
+    formatting_score = min(formatting_score, 100)
+
+    overall = int(0.35 * content_score + 0.35 * structure_score + 0.30 * formatting_score)
+    feedback = []
+    if not email_present:
+        feedback.append("Add a professional email address.")
+    if not phone_present:
+        feedback.append("Include a phone number.")
+    if not linkedin_present:
+        feedback.append("Add a LinkedIn profile link.")
+    if quantified_count < 2:
+        feedback.append("Include more quantified impact (%, $, scale).")
+    if action_verb_hits < 3:
+        feedback.append("Start bullets with strong action verbs.")
+    if not section_headings["skills"]:
+        feedback.append("Add a dedicated skills section.")
+
+    return {
+        "overall_score": overall,
+        "breakdown": {
+            "structure": structure_score,
+            "content_strength": content_score,
+            "formatting": formatting_score,
+        },
+        "signals": {
+            "word_count": word_count,
+            "bullet_count": bullet_count,
+            "quantified_impact_count": quantified_count,
+            "action_verb_hits": action_verb_hits,
+            "avg_sentence_length": avg_sentence_len,
+        },
+        "feedback": feedback[:6],
+    }
 
 def extract_audio_from_video(video_url: str, output_audio: str) -> None:
     """
@@ -303,20 +642,19 @@ def send_interview_invite_email(invite: InterviewInvite):
         msg['From'] = GMAIL_USER
         msg['To'] = invite.email
         
+        join_link = f"{FRONTEND_URL}/candidates/join?code={invite.invite_code}"
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #2563eb;">Interview Invitation</h2>
             <p>Hello,</p>
             <p>You have been invited to participate in an interview: <strong>{invite.interview_title}</strong></p>
-            <p>Your unique interview code is: <strong style="font-size: 18px; color: #2563eb;">{invite.invite_code}</strong></p>
             <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <h3>To access your interview:</h3>
-                <ol>
-                    <li>Visit: <a href="http://localhost:3000/candidates">http://localhost:3000/candidates</a></li>
-                    <li>If you have an account, log in and use the 'Add Interview' button</li>
-                    <li>If you don't have an account, sign up and then use the 'Add Interview' button</li>
-                    <li>Enter your interview code: <strong>{invite.invite_code}</strong></li>
-                </ol>
+                <h3>Access your interview:</h3>
+                <p>Click the link below to join. If you don't have an account yet, you'll be prompted to create one first.</p>
+                <p style="margin: 20px 0;">
+                    <a href="{join_link}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 8px; font-weight: 600;">Join Interview</a>
+                </p>
+                <p style="font-size: 12px; color: #6b7280;">Or copy this link: {join_link}</p>
             </div>
             <p>Please complete your interview within the specified timeframe.</p>
             <p>Best regards,<br><strong>{invite.recruiter_name}</strong></p>
@@ -330,13 +668,10 @@ def send_interview_invite_email(invite: InterviewInvite):
         
         You have been invited to participate in an interview: {invite.interview_title}
         
-        Your unique interview code is: {invite.invite_code}
+        To access your interview, click or copy this link:
+        {join_link}
         
-        To access your interview:
-        1. Visit: http://localhost:3000/candidates
-        2. If you have an account, log in and use the 'Add Interview' button
-        3. If you don't have an account, sign up and then use the 'Add Interview' button
-        4. Enter your interview code: {invite.invite_code}
+        If you don't have an account yet, you'll be prompted to create one first.
         
         Please complete your interview within the specified timeframe.
         
@@ -581,10 +916,43 @@ async def resume_relevance(request: ResumeRelevanceRequest):
             return {"highlights": [], "error": "Could not extract resume text."}
 
         max_items = request.max_items or 6
+        smart_match = smart_resume_jd_match(resume_text, job_desc, max_items=max_items)
+        if smart_match.get("highlights"):
+            return smart_match
+
         highlights = extract_relevant_resume_lines(resume_text, job_desc, max_items=max_items)
-        return {"highlights": highlights}
+        return {"highlights": highlights, "requirements": [], "overall_match_score": 0, "error": smart_match.get("error")}
     except Exception as e:
-        return {"highlights": [], "error": str(e)}
+        return {"highlights": [], "requirements": [], "overall_match_score": 0, "error": str(e)}
+
+@app.post("/resume-quality")
+async def resume_quality(request: ResumeQualityRequest):
+    try:
+        resume_text = request.resume_text or ""
+        if not resume_text:
+            if not request.candidate_id:
+                raise HTTPException(status_code=400, detail="Missing resume_text or candidate_id.")
+
+            resume_result = supabase.table("resumes") \
+                .select("file_path, uploaded_at") \
+                .eq("user_id", request.candidate_id) \
+                .order("uploaded_at", desc=True) \
+                .limit(1) \
+                .execute()
+            if not resume_result.data:
+                return {"error": "No resume found for this candidate."}
+
+            file_path = resume_result.data[0].get("file_path") or ""
+            if not file_path.lower().endswith(".pdf"):
+                return {"error": "Unsupported resume format. Please upload a PDF."}
+
+            resume_text = extract_resume_text_from_pdf_url(file_path)
+            if not resume_text.strip():
+                return {"error": "Could not extract resume text."}
+
+        return score_resume_quality(resume_text)
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.post("/recruiter-chat")
 async def recruiter_chat(req: RecruiterChatRequest):

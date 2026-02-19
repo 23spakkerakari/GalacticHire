@@ -3,14 +3,16 @@ import { ProfileFormData } from "@/types/candidate";
 import { useRouter } from "next/navigation";
 
 interface ProfileFormProps {
-  onSubmit: (data: ProfileFormData) => void;
+  onSubmit: (data: ProfileFormData) => void | Promise<void>;
   profileData?: ProfileFormData;
+  /** When true, skips router.refresh() and reload after submit (caller handles redirect) */
+  skipReloadAfterSubmit?: boolean;
 }
 
-export const ProfileForm = ({ onSubmit, profileData }: ProfileFormProps) => {
+export const ProfileForm = ({ onSubmit, profileData, skipReloadAfterSubmit }: ProfileFormProps) => {
   const router = useRouter();
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = {
@@ -19,13 +21,12 @@ export const ProfileForm = ({ onSubmit, profileData }: ProfileFormProps) => {
       experience: formData.get("experience") as string,
       linkedin: formData.get("linkedin") as string,
     };
-    onSubmit(data);
+    await onSubmit(data);
 
-    // Force a reload after submission to refresh the UI state
-    setTimeout(() => {
+    if (!skipReloadAfterSubmit) {
       router.refresh();
       window.location.reload();
-    }, 500);
+    }
   };
 
   return (

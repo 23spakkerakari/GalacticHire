@@ -60,15 +60,25 @@ export default function InterviewSession() {
     return false;
   };
 
-  // Fetch generic questions from Supabase
-  const fetchGenericQuestions = async () => {
+  // Fetch interview questions from the interview row (questions column)
+  const fetchInterviewQuestions = async () => {
+    if (!interviewId) return;
     const { data, error } = await supabase
       .from("interview")
-      .select("question");
+      .select("questions")
+      .eq("id", interviewId)
+      .single();
     if (error) {
-      console.error("Error retrieving questions from supabase");
-    } else if (data) {
-      setQuestions(data.map((q) => q.question));
+      console.error("Error retrieving questions from supabase:", error.message);
+      setQuestions([]);
+    } else {
+      const raw = data?.questions;
+      const list = Array.isArray(raw)
+        ? raw
+            .map((q: any) => (typeof q === "string" ? q : q?.question))
+            .filter((q: any) => typeof q === "string" && q.trim().length > 0)
+        : [];
+      setQuestions(list);
     }
     setIsQuestionsLoading(false);
   };
@@ -84,29 +94,19 @@ export default function InterviewSession() {
     if (userId) {
       const gotPersonalized = await fetchPersonalizedQuestions(userId);
       if (!gotPersonalized) {
-        await fetchGenericQuestions();
+        await fetchInterviewQuestions();
         setUsedPersonalized(false);
       }
     } else {
-      await fetchGenericQuestions();
+      await fetchInterviewQuestions();
       setUsedPersonalized(false);
     }
   };
 
   useEffect(() => {
-    async function fetchQuestions() {
-      const { data, error } = await supabase
-        .from("interview_questions")
-        .select("question");
-      if (error) {
-        console.error("Error retrieving questions from supabase");
-      } else if (data) {
-        setQuestions(data.map((q) => q.question));
-      }
-      setIsQuestionsLoading(false);
-    }
-    fetchQuestions();
-  }, []);
+    setIsQuestionsLoading(true);
+    fetchInterviewQuestions();
+  }, [interviewId]);
 
   useEffect(() => {
     if (!isInterviewStarted) {

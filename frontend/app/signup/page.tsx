@@ -13,8 +13,8 @@ export default function SignUpPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // Get interview code from URL if present
-  const interviewCode = searchParams.get('code');
+  const redirectTo = searchParams.get("redirect");
+  const interviewCode = searchParams.get("code");
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -77,15 +77,13 @@ export default function SignUpPage() {
         const roles = user?.app_metadata?.roles || ["candidate"];
 
         if (roles.includes("recruiter")) {
-          console.log("Redirecting to recruiter dashboard");
           router.push("/recruiters");
+        } else if (redirectTo && redirectTo.startsWith("/")) {
+          router.push(redirectTo);
+        } else if (interviewCode) {
+          router.push(`/candidates/join?code=${interviewCode}`);
         } else {
-          // If there's an interview code, redirect to dashboard with code
-          if (interviewCode) {
-            router.push(`/candidates/dashboard?code=${interviewCode}`);
-          } else {
-            router.push("/candidates/upload-resume"); 
-          }
+          router.push("/candidates/upload-resume");
         }
       } catch (err) {
         console.error("Unexpected error after signup:", err);
@@ -246,7 +244,10 @@ export default function SignUpPage() {
 
         <p className="mt-4 text-center text-sm text-gray-400">
           Already have an account?{" "}
-          <Link href="/login" className="text-blue-400 hover:underline">
+          <Link
+            href={redirectTo ? `/login?redirect=${encodeURIComponent(redirectTo)}` : "/login"}
+            className="text-blue-400 hover:underline"
+          >
             Sign in
           </Link>
         </p>

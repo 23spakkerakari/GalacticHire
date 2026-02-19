@@ -1,12 +1,14 @@
 "use client";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { loginUser } from "@/store/slices/authSlice";
 
-export default function SignInPage() {
+function SignInForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect");
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
   const [showPassword, setShowPassword] = useState(false);
@@ -19,7 +21,8 @@ export default function SignInPage() {
 
     const result = await dispatch(loginUser({ email, password }));
     if (loginUser.fulfilled.match(result)) {
-      router.push("/candidates/dashboard");
+      const target = redirectTo && redirectTo.startsWith("/") ? redirectTo : "/candidates";
+      router.push(target);
     }
   };
 
@@ -125,7 +128,10 @@ export default function SignInPage() {
 
         <p className="mt-4 text-center text-sm text-gray-400">
           Don't have an account?{" "}
-          <Link href="/signup" className="text-blue-400 hover:underline">
+          <Link
+            href={redirectTo ? `/signup?redirect=${encodeURIComponent(redirectTo)}` : "/signup"}
+            className="text-blue-400 hover:underline"
+          >
             Sign up
           </Link>
         </p>
@@ -143,5 +149,17 @@ export default function SignInPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="w-10 h-10 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <SignInForm />
+    </Suspense>
   );
 }

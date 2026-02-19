@@ -19,6 +19,11 @@ export default function UploadResumePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
 
+    // Refresh profile data on mount so we have latest after completing profile step
+    useEffect(() => {
+        refresh();
+    }, [refresh]);
+
     useEffect(() => {
         redirectIfNeeded('resume');
     }, [loading, step]);
