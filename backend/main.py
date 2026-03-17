@@ -15,6 +15,7 @@ from typing import List, Optional
 import spacy
 import json
 from services.sentiment import summarize_text, analyze_communication, generate_behavioral_insights
+from services.resume_questions_service import generate_resume_questions_and_sync_profile
 import requests
 import subprocess
 import librosa
@@ -161,6 +162,14 @@ class ResumeQualityRequest(BaseModel):
     candidate_id: str | None = None
     resume_text: str | None = None
 
+class EnsureSampleParticipantRequest(BaseModel):
+    user_id: str
+
+class RecordSampleCompletionRequest(BaseModel):
+    interview_id: str
+    user_id: str
+    completed_at: str | None = None
+
 def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
     prompt = (
         f"Extract {num_themes} main themes from the following transcript. "
@@ -169,12 +178,17 @@ def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
         "Themes (comma-separated):"
     )
 
-    response = client.completions.create(engine="text-davinci-003",
-    prompt=prompt,
-    max_completion_tokens=100,
-    temperature=0.5)
+    response = client.chat.completions.create(
+        model="gpt-5-mini",
+        messages=[
+            {"role": "system", "content": "You extract concise interview themes."},
+            {"role": "user", "content": prompt},
+        ],
+        max_completion_tokens=100,
+        temperature=0.5,
+    )
 
-    raw_themes = response.choices[0].text.strip()
+    raw_themes = (response.choices[0].message.content or "").strip()
     themes = [theme.strip() for theme in raw_themes.split(",") if theme.strip()]
     return themes[:num_themes]
 
@@ -566,7 +580,34 @@ def extract_audio_from_video(video_url: str, output_audio: str) -> None:
     command = f"ffmpeg -y -i {video_url} -q:a 0 -map a {output_audio}"
     subprocess.run(command, shell=True, check=True)
 
-def analyze_video(video_url: str):
+def get_job_description_for_interview(interview_id: str | None) -> str:
+    """Resolve recruiter job description for the given interview."""
+    if not interview_id:
+        return ""
+
+    interview_result = supabase.table("interview") \
+        .select("recruiter_id") \
+        .eq("id", interview_id) \
+        .limit(1) \
+        .execute()
+    if not interview_result.data:
+        return ""
+
+    recruiter_id = interview_result.data[0].get("recruiter_id")
+    if not recruiter_id:
+        return ""
+
+    job_result = supabase.table("job_descriptions") \
+        .select("description") \
+        .eq("recruiter_id", recruiter_id) \
+        .limit(1) \
+        .execute()
+    if not job_result.data:
+        return ""
+
+    return job_result.data[0].get("description") or ""
+
+def analyze_video(video_url: str, interview_id: str | None = None):
     """Analyze video and return comprehensive results"""
     try:
         print(f"Attempting to transcribe video from URL: {video_url}")
@@ -591,8 +632,8 @@ def analyze_video(video_url: str):
         transcript_text = transcript.text
         summary = summarize_text(transcript_text)
         communication_analysis = analyze_communication(transcript_text)
-        behavioral_insights = generate_behavioral_insights(transcript_text, supabase.table('job_descriptions').select('description').eq('recruiter_id', video.user_id ).execute().data[0].get('description'))
-        print("Quick recruiter-id check", video.user_id)
+        job_description = get_job_description_for_interview(interview_id)
+        behavioral_insights = generate_behavioral_insights(transcript_text, job_description)
 
         os.makedirs("txt_files", exist_ok=True)
         filename = f"summary_{abs(hash(video_url))}.txt"
@@ -730,7 +771,7 @@ async def analyze_video_endpoint(video: VideoURL):
     """Analyze video and store results"""
     try:
         print(f"Received request to analyze video: {video.video_url}")
-        result = analyze_video(video.video_url)
+        result = analyze_video(video.video_url, video.interview_id)
 
         if not result:
             return {"error": "Failed to analyze video", "details": "No result returned from analysis"}
@@ -748,7 +789,7 @@ async def analyze_video_endpoint(video: VideoURL):
                     print(f"{'='*50}\n")
                     print
                     
-                    supabase.table('interview_answers').upsert({
+                    answer_payload = {
                         'user_id': video.user_id,
                         'question_index': video.question_index,
                         'question_text': video.question_text or '',
@@ -759,10 +800,30 @@ async def analyze_video_endpoint(video: VideoURL):
                         'behavioral_insights': json.dumps(result.get('behavioral_insights', {})),
                         'created_at': datetime.now().isoformat(),
                         'interview_id': video.interview_id
-                    }).execute()
+                    }
+
+                    is_sample_submission = False
+                    if video.interview_id:
+                        interview_meta = supabase.table("interview") \
+                            .select("title") \
+                            .eq("id", video.interview_id) \
+                            .limit(1) \
+                            .execute()
+                        interview_title = ""
+                        if getattr(interview_meta, "data", None):
+                            interview_title = str(interview_meta.data[0].get("title", "")).lower()
+                        is_sample_submission = ("sample" in interview_title) or ("test" in interview_title)
+
+                    if is_sample_submission:
+                        write_result = supabase.table('interview_answers').insert(answer_payload).execute()
+                    else:
+                        write_result = supabase.table('interview_answers').upsert(answer_payload).execute()
+                    if getattr(write_result, "error", None):
+                        raise Exception(f"Failed to store interview answer: {write_result.error}")
                     print(f"Analysis results stored for user {video.user_id}, question {video.question_index}")
             except Exception as e:
                 print(f"Error storing analysis results: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Analysis completed but saving results failed: {str(e)}")
 
         return result
     except ValueError as ve:
@@ -839,48 +900,11 @@ def generate_personalized_questions_from_resume(resume_text: str, job_descriptio
 async def generate_resume_questions_from_db(request: ResumeQuestionsRequest):
     """Generate questions from the latest resume PDF in Supabase for a user"""
     try:
-        user_id = request.user_id
-        # 1. Fetch latest resume for user_id from Supabase
-        result = supabase.table("resumes").select("id, file_path, original_name, uploaded_at").eq("user_id", user_id).order("uploaded_at", desc=True).limit(1).execute()
-        if not result.data or len(result.data) == 0:
-            return {"error": "No resume found for this user."}
-        resume = result.data[0]
-        pdf_url = resume["file_path"]
-        
-        # 2. Download PDF from file_path
-        pdf_response = requests.get(pdf_url)
-        if pdf_response.status_code != 200:
-            return {"error": f"Failed to download PDF from storage. Status code: {pdf_response.status_code}"}
-        
-        # 3. Extract text from PDF
-        with open("temp_resume.pdf", "wb") as f:
-            f.write(pdf_response.content)
-        try:
-            with pdfplumber.open("temp_resume.pdf") as pdf:
-                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-        finally:
-            os.remove("temp_resume.pdf")
-        if not text.strip():
-            return {"error": "Could not extract text from the PDF."}
-        
-
-        # 4. Generate questions using the new function
-        job_description = supabase.table('job_descriptions').select('description').eq('recruiter_id', user_id).execute()
-        questions = generate_personalized_questions_from_resume(text, job_description[0]['description'], num_questions=3)
-        if not questions:
-            return {"error": "No questions could be generated from the resume."}
-        
-        # 5. Store questions in resume_questions table
-        for idx, question in enumerate(questions):
-            supabase.table('resume_questions').insert({
-                'user_id': user_id,
-                'question_index': idx,
-                'question_text': question['question'],
-                'created_at': datetime.now().isoformat()
-            }).execute()
-        
-        # 6. Return questions
-        return {"questions": questions}
+        return generate_resume_questions_and_sync_profile(
+            supabase=supabase,
+            user_id=request.user_id,
+            resume_question_generator=generate_personalized_questions_from_resume,
+        )
     except Exception as e:
         print(f"Error in generate_resume_questions_from_db: {str(e)}")
         return {"error": str(e)}
@@ -953,6 +977,82 @@ async def resume_quality(request: ResumeQualityRequest):
         return score_resume_quality(resume_text)
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/latest-sample-interview")
+async def latest_sample_interview():
+    """Return latest global sample/test interview metadata."""
+    try:
+        result = supabase.table("interview") \
+            .select("id, title, scheduled_date, company, created_at") \
+            .or_("title.ilike.%sample%,title.ilike.%test%") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if result.data and len(result.data) > 0:
+            return {"interview": result.data[0]}
+        return {"interview": None}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ensure-sample-interview-participant")
+async def ensure_sample_interview_participant(req: EnsureSampleParticipantRequest):
+    """Ensure user is attached to latest sample/test interview for practice flow."""
+    try:
+        sample = supabase.table("interview") \
+            .select("id, title, created_at") \
+            .or_("title.ilike.%sample%,title.ilike.%test%") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if not sample.data or len(sample.data) == 0:
+            return {"ok": False, "reason": "no_sample_interview"}
+
+        sample_interview_id = sample.data[0]["id"]
+        existing = supabase.table("interview_participants") \
+            .select("id") \
+            .eq("interview_id", sample_interview_id) \
+            .eq("user_id", req.user_id) \
+            .limit(1) \
+            .execute()
+
+        if not existing.data:
+            supabase.table("interview_participants").insert({
+                "interview_id": sample_interview_id,
+                "user_id": req.user_id,
+                "status": "active",
+                "joined_at": datetime.now().isoformat(),
+                "completed": False,
+            }).execute()
+
+        return {"ok": True, "interview_id": sample_interview_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/record-sample-interview-completion")
+async def record_sample_interview_completion(req: RecordSampleCompletionRequest):
+    """Store a completed sample interview copy using service-role access."""
+    try:
+        completed_at = req.completed_at or datetime.now().isoformat()
+        write_result = supabase.table("interview_participants").insert({
+            "interview_id": req.interview_id,
+            "user_id": req.user_id,
+            "status": "completed",
+            "joined_at": completed_at,
+            "completed": True,
+        }).execute()
+
+        error = getattr(write_result, "error", None)
+        if error:
+            raise HTTPException(status_code=400, detail=str(error))
+
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        message = str(e)
+        if "23505" in message or "interview_participants_unique" in message:
+            return {"ok": True, "duplicate": True}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/recruiter-chat")
 async def recruiter_chat(req: RecruiterChatRequest):

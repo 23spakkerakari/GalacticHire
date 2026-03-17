@@ -10,11 +10,24 @@ import { RecordingControls } from "../components/RecordingControls";
 import { useVideoRecording } from "@/hooks/useVideoRecording";
 import { useSupabaseUpload } from "@/hooks/useSupabaseUpload";
 import { useProfile } from "@/hooks/useProfile";
+import type { ProfileFormData } from "@/types/candidate";
 import { AudioLevelMeter } from "../components/AudioLevelMeter";
 import { DeviceSelector } from "../components/DeviceSelector";
 import React from "react";
 
 const supabase = createClient();
+const QUESTION_CACHE_KEY_PREFIX = "hirevision:interview-questions";
+const SAMPLE_INTERVIEW_FALLBACK_QUESTIONS = [
+  "Tell me about yourself and what excites you most about this role.",
+  "Describe a challenging project you worked on and how you approached solving it.",
+  "Why do you want to join our company, and what impact do you hope to make in your first 90 days?",
+];
+
+interface QuestionCachePayload {
+  interviewQuestions: string[];
+  profileQuestions: string[];
+  updatedAt: string;
+}
 
 export default function InterviewSession() {
   const router = useRouter();
@@ -37,70 +50,159 @@ export default function InterviewSession() {
   const [questions, setQuestions] = useState<string[]>([]);
   const [isQuestionsLoading, setIsQuestionsLoading] = useState<boolean>(true);
   const [usedPersonalized, setUsedPersonalized] = useState<boolean>(false);
+  const [isSampleInterviewSession, setIsSampleInterviewSession] = useState(false);
   const [showConfirmFinishModal, setShowConfirmFinishModal] = useState(false);
   const [hasConfirmedFinish, setHasConfirmedFinish] = useState(false);
   const [showCameraDuringInterview, setShowCameraDuringInterview] = useState(true);
 
-  // Fetch personalized questions on interview start
-  const fetchPersonalizedQuestions = async (userId: string) => {
-    try {
-      const response = await fetch(`${getBackendUrl()}/get-personalized-questions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
-      });
-      const data = await response.json();
-      if (response.ok && data.questions && data.questions.length > 0) {
-        setQuestions(data.questions.map((q: { question: string }) => q.question));
-        setUsedPersonalized(true);
-        setIsQuestionsLoading(false);
-        return true;
-      }
-    } catch (err) {}
-    return false;
+  const normalizeQuestions = (raw: any): string[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((q: any) => (typeof q === "string" ? q : q?.question))
+      .filter((q: any) => typeof q === "string" && q.trim().length > 0);
   };
 
-  // Fetch interview questions from the interview row (questions column)
-  const fetchInterviewQuestions = async () => {
-    if (!interviewId) return;
+  const getQuestionCacheKey = (userId: string, currentInterviewId: string) =>
+    `${QUESTION_CACHE_KEY_PREFIX}:${userId}:${currentInterviewId}`;
+
+  const readQuestionCache = (userId: string, currentInterviewId: string): QuestionCachePayload | null => {
+    try {
+      const raw = sessionStorage.getItem(getQuestionCacheKey(userId, currentInterviewId));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as QuestionCachePayload;
+      if (!Array.isArray(parsed.interviewQuestions) || !Array.isArray(parsed.profileQuestions)) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeQuestionCache = (
+    userId: string,
+    currentInterviewId: string,
+    interviewQuestions: string[],
+    profileQuestions: string[],
+  ) => {
+    const payload: QuestionCachePayload = {
+      interviewQuestions,
+      profileQuestions,
+      updatedAt: new Date().toISOString(),
+    };
+    sessionStorage.setItem(getQuestionCacheKey(userId, currentInterviewId), JSON.stringify(payload));
+  };
+
+  const fetchInterviewQuestionList = async (currentInterviewId: string): Promise<string[]> => {
     const { data, error } = await supabase
       .from("interview")
-      .select("questions")
-      .eq("id", interviewId)
+      .select("title, questions")
+      .eq("id", currentInterviewId)
       .single();
+
     if (error) {
       console.error("Error retrieving questions from supabase:", error.message);
-      setQuestions([]);
-    } else {
-      const raw = data?.questions;
-      const list = Array.isArray(raw)
-        ? raw
-            .map((q: any) => (typeof q === "string" ? q : q?.question))
-            .filter((q: any) => typeof q === "string" && q.trim().length > 0)
-        : [];
-      setQuestions(list);
+      setIsSampleInterviewSession(false);
+      return [];
     }
+
+    const interviewQuestions = normalizeQuestions(data?.questions);
+    const interviewTitle = String(data?.title || "").toLowerCase();
+    const isSampleInterview = interviewTitle.includes("sample") || interviewTitle.includes("test");
+    setIsSampleInterviewSession(isSampleInterview);
+
+    if (interviewQuestions.length === 0 && isSampleInterview) {
+      return SAMPLE_INTERVIEW_FALLBACK_QUESTIONS;
+    }
+
+    return interviewQuestions;
+  };
+
+  const fetchProfileQuestionList = async (userId: string): Promise<string[]> => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("questions")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error retrieving profile questions from supabase:", error.message);
+      return [];
+    }
+
+    return normalizeQuestions(data?.questions);
+  };
+
+  const loadAndCacheQuestionSets = async (
+    userId: string,
+    currentInterviewId: string,
+    forceRefresh = false,
+  ): Promise<QuestionCachePayload> => {
+    const cached = readQuestionCache(userId, currentInterviewId);
+    if (cached && !forceRefresh) return cached;
+
+    try {
+      const [interviewQuestions, profileQuestions] = await Promise.all([
+        fetchInterviewQuestionList(currentInterviewId),
+        fetchProfileQuestionList(userId),
+      ]);
+
+      writeQuestionCache(userId, currentInterviewId, interviewQuestions, profileQuestions);
+      return {
+        interviewQuestions,
+        profileQuestions,
+        updatedAt: new Date().toISOString(),
+      };
+    } catch {
+      return cached || {
+        interviewQuestions: [],
+        profileQuestions: [],
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  };
+
+  const fetchInterviewQuestions = async () => {
+    if (!interviewId) return;
+    const list = await fetchInterviewQuestionList(interviewId);
+    setQuestions(list.length > 0 ? list : SAMPLE_INTERVIEW_FALLBACK_QUESTIONS);
     setIsQuestionsLoading(false);
   };
 
-  // When interview starts, fetch personalized questions first, fallback to generic
+  // On interview start, load both question sets for this user and interview from cache/network.
   const startInterview = async () => {
     if (!isCameraActive) {
       await activateCamera();
     }
     setIsInterviewStarted(true);
     setIsQuestionsLoading(true);
-    const userId = (await supabase.auth.getUser()).data.user?.id;
-    if (userId) {
-      const gotPersonalized = await fetchPersonalizedQuestions(userId);
-      if (!gotPersonalized) {
-        await fetchInterviewQuestions();
-        setUsedPersonalized(false);
-      }
-    } else {
-      await fetchInterviewQuestions();
+    const currentInterviewId = interviewId;
+    const userId = (await supabase.auth.getUser()).data.user?.id || null;
+
+    if (!currentInterviewId) {
+      setQuestions([]);
       setUsedPersonalized(false);
+      setIsQuestionsLoading(false);
+      return;
     }
+
+    if (!userId) {
+      const fallbackQuestions = await fetchInterviewQuestionList(currentInterviewId);
+      setQuestions(fallbackQuestions);
+      setUsedPersonalized(false);
+      setIsQuestionsLoading(false);
+      return;
+    }
+
+    const { interviewQuestions, profileQuestions } = await loadAndCacheQuestionSets(userId, currentInterviewId, true);
+    const selectedQuestions = profileQuestions.length > 0
+      ? profileQuestions
+      : interviewQuestions.length > 0
+        ? interviewQuestions
+        : SAMPLE_INTERVIEW_FALLBACK_QUESTIONS;
+    setQuestions(selectedQuestions);
+    setUsedPersonalized(profileQuestions.length > 0);
+    setIsQuestionsLoading(false);
   };
 
   useEffect(() => {
@@ -138,6 +240,9 @@ export default function InterviewSession() {
   const { isUploading, uploadProgress, uploadVideo } = useSupabaseUpload();
 
   const { isLoading, showProfileForm, profileData, userEmail, updateProfile, updateVideoUrl } = useProfile();
+  const handleProfileSubmit = async (formData: ProfileFormData): Promise<void> => {
+    await updateProfile(formData);
+  };
 
   const activateCamera = async () => {
     setIsCameraActive(true);
@@ -185,7 +290,6 @@ export default function InterviewSession() {
       .from("interview_participants")
       .update({
         completed: true,
-        completed_at: new Date().toISOString(),
       })
       .eq("interview_id", interviewId)
       .eq("user_id", userId);
@@ -198,7 +302,9 @@ export default function InterviewSession() {
     setIsInterviewFinished(true);
     setProcessingStatus("Uploading and analyzing your interview responses...");
     const userId = (await supabase.auth.getUser()).data.user?.id;
+    const completedAt = new Date().toISOString();
     let completedUploads = 0;
+    let failedUploads = 0;
     for (const [questionIndex, videoBlob] of Object.entries(recordedAnswers)) {
       try {
         const { publicUrl, signedUrl: newSignedUrl, filename } = await uploadVideo(videoBlob);
@@ -219,16 +325,60 @@ export default function InterviewSession() {
             setProcessingStatus(
               `Processed ${completedUploads} of ${Object.keys(recordedAnswers).length} responses...`
             );
+          } else {
+            failedUploads++;
+            const errBody = await response.json().catch(() => null);
+            console.error(
+              `Failed processing question ${questionIndex}:`,
+              errBody?.detail || response.statusText
+            );
           }
+        } else {
+          failedUploads++;
         }
       } catch (error) {
+        failedUploads++;
         console.error(`Error processing answer for question ${questionIndex}:`, error);
       }
     }
+    if (failedUploads > 0) {
+      setIsAnalysisComplete(false);
+      setProcessingStatus(
+        `Processed ${completedUploads} responses, but ${failedUploads} failed. Please retry this interview.`
+      );
+      return;
+    }
+
     setIsAnalysisComplete(true);
     setProcessingStatus("All responses have been uploaded and sent for analysis!");
-    // Mark interview as completed in Supabase
-    if (interviewId && userId) {
+    // Normal interviews become completed. Sample interviews keep one active row
+    // and add a completed copy for each attempt so testing history accumulates.
+    if (interviewId && userId && isSampleInterviewSession) {
+      try {
+        const response = await fetch(`${getBackendUrl()}/record-sample-interview-completion`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            interview_id: interviewId,
+            user_id: userId,
+            completed_at: completedAt,
+          }),
+        });
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          console.error(
+            `Error inserting sample completion for interview ${interviewId}:`,
+            errorBody?.detail || response.statusText
+          );
+        } else {
+          console.log(`Successfully stored sample completion copy for interview ${interviewId}`);
+        }
+      } catch (error) {
+        console.error("Error storing sample interview completion copy:", error);
+      }
+    } else if (interviewId && userId) {
       try {
         const { error: updateError } = await supabase
           .from("interview_participants")
@@ -282,7 +432,7 @@ export default function InterviewSession() {
 
   if (showProfileForm) {
     return (
-      <ProfileForm onSubmit={updateProfile} profileData={profileData || undefined} />
+      <ProfileForm onSubmit={handleProfileSubmit} profileData={profileData || undefined} />
     );
   }
 

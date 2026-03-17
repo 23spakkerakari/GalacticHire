@@ -28,6 +28,7 @@ import Link from "next/link";
 import { createClient } from "@/utils/auth";
 import { useRouter } from "next/navigation";
 import InterviewQuestions from "./InterviewQuestions";
+import { getBackendUrl } from "@/utils/env";
 
 // Professional color palette
 const CHART_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#6366f1", "#ec4899"];
@@ -200,6 +201,15 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   }, [videos, filters]);
 
+  const sampleInterviewVideos = useMemo(
+    () =>
+      videos.filter((video) => {
+        const label = `${video.interview_title || ""} ${video.title || ""}`.toLowerCase();
+        return label.includes("sample") || label.includes("test");
+      }),
+    [videos]
+  );
+
   const dynamicMetrics = {
     ...aggregateMetrics,
     totalApplicants: videos.length,
@@ -217,7 +227,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     setIsChatLoading(true);
     setChatReply(null);
     try {
-      const baseUrl = "http://localhost:8000";
+      const baseUrl = getBackendUrl();
       const res = await fetch(`${baseUrl}/recruiter-chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -390,6 +400,31 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <MetricCard value={dynamicMetrics.averageTechnicalScore} label="Avg Technical" color="emerald" theme={theme} />
                 <MetricCard value={dynamicMetrics.averageCommunicationScore} label="Avg Communication" color="indigo" theme={theme} />
                 <MetricCard value={dynamicMetrics.applicantsInProgress} label="In Progress" color="amber" theme={theme} />
+              </div>
+
+              <div className={`rounded-xl border p-5 transition-colors ${t.cardBg}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className={`text-sm font-medium ${t.textPrimary}`}>Sample Interview Results</h3>
+                  <span className={`text-xs px-2 py-1 rounded-md ${theme === "dark" ? "bg-slate-800 text-slate-300" : "bg-gray-100 text-gray-700"}`}>
+                    {sampleInterviewVideos.length} {sampleInterviewVideos.length === 1 ? "submission" : "submissions"}
+                  </span>
+                </div>
+                {sampleInterviewVideos.length > 0 ? (
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {sampleInterviewVideos.slice(0, 6).map((video) => (
+                      <button
+                        key={`${video.id}-${video.interview_id || video.created_at || "sample"}`}
+                        onClick={() => onVideoSelect(video)}
+                        className={`text-left rounded-lg border px-3 py-2 transition-colors ${theme === "dark" ? "bg-slate-800/30 border-slate-700/50 hover:bg-slate-800/60" : "bg-gray-50 border-gray-200 hover:bg-gray-100"}`}
+                      >
+                        <p className={`text-sm font-medium truncate ${t.textPrimary}`}>{video.candidate_details?.full_name || video.title}</p>
+                        <p className={`text-xs truncate ${t.textSecondary}`}>{video.interview_title || "Sample/Test Interview"}</p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={`text-sm ${t.textSecondary}`}>No sample/test interview submissions yet.</p>
+                )}
               </div>
 
               {/* Two Column Layout */}

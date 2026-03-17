@@ -8,6 +8,7 @@ import { ProfileForm } from "./components/ProfileForm";
 import { useCandidateOnboardingStep } from "@/hooks/useCandidateOnboardingStep";
 import InterviewDetailsModal from "./dashboard/components/InterviewDetailsModal";
 import Link from "next/link";
+import { ensureLatestSampleInterviewParticipant, getLatestSampleInterview } from "./utils/sampleInterview";
 
 // Types
 interface Interview {
@@ -37,20 +38,12 @@ interface PendingInterview {
 
 type Theme = "dark" | "light";
 
-// Sample data
-const SAMPLE_INTERVIEW: PendingInterview = {
-  id: "sample-1",
-  title: "Sample Interview",
-  scheduledDate: "April 30, 2025",
-  company: "SampleCorp",
-  logo: "S",
-};
-
 export default function CandidateDashboard() {
   const [activeTab, setActiveTab] = useState<"pending" | "completed" | "stats">("pending");
   const [completed, setCompleted] = useState<InterviewParticipant[]>([]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const [pendingInterviews, setPendingInterviews] = useState<PendingInterview[]>([]);
+  const [sampleInterviewTile, setSampleInterviewTile] = useState<PendingInterview | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
 
@@ -85,6 +78,14 @@ export default function CandidateDashboard() {
     tabInactive: theme === "dark" ? "text-slate-400 hover:text-slate-200" : "text-gray-500 hover:text-gray-700",
     dropdownBg: theme === "dark" ? "bg-slate-900 border-slate-800" : "bg-white border-gray-200",
   };
+
+  const buildSampleTile = (interview: any): PendingInterview => ({
+    id: interview.id,
+    title: interview.title || "Sample Interview",
+    scheduledDate: interview.scheduled_date || "Always available",
+    company: interview.company || "Practice",
+    logo: (interview.company || "S").charAt(0).toUpperCase(),
+  });
 
   // Get current user ID
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -131,6 +132,19 @@ export default function CandidateDashboard() {
       const userId = await getCurrentUserId();
       if (!userId) return;
 
+      // Ensure sample/test uses the same DB-backed interview pipeline.
+      await ensureLatestSampleInterviewParticipant(supabase, userId);
+      const sampleInterview = await getLatestSampleInterview(supabase);
+      const mappedSample = sampleInterview
+        ? {
+            id: sampleInterview.id,
+            title: sampleInterview.title || "Sample Interview",
+            scheduledDate: sampleInterview.scheduled_date || "Always available",
+            company: sampleInterview.company || "Practice",
+            logo: (sampleInterview.company || "S").charAt(0).toUpperCase(),
+          }
+        : null;
+
       const { data, error } = await supabase
         .from("interview_participants")
         .select("interview:interview_id(*), status")
@@ -139,7 +153,8 @@ export default function CandidateDashboard() {
 
       if (error) {
         console.error("Error fetching pending interviews:", error);
-        setPendingInterviews([SAMPLE_INTERVIEW]);
+        setSampleInterviewTile(mappedSample);
+        setPendingInterviews([]);
         return;
       }
 
@@ -154,10 +169,23 @@ export default function CandidateDashboard() {
         };
       });
 
-      setPendingInterviews([SAMPLE_INTERVIEW, ...mapped]);
+      setSampleInterviewTile(mappedSample);
+      setPendingInterviews(mapped.filter((item) => item.id !== mappedSample?.id));
     } catch (error) {
       console.error("Error in fetchPendingInterviews:", error);
-      setPendingInterviews([SAMPLE_INTERVIEW]);
+      const sampleInterview = await getLatestSampleInterview(supabase).catch(() => null);
+      setSampleInterviewTile(
+        sampleInterview
+          ? {
+              id: sampleInterview.id,
+              title: sampleInterview.title || "Sample Interview",
+              scheduledDate: sampleInterview.scheduled_date || "Always available",
+              company: sampleInterview.company || "Practice",
+              logo: (sampleInterview.company || "S").charAt(0).toUpperCase(),
+            }
+          : null
+      );
+      setPendingInterviews([]);
     } finally {
       setIsLoadingData(false);
     }
@@ -184,7 +212,9 @@ export default function CandidateDashboard() {
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-    } catch {}
+    } catch {
+      // ignore sign-out errors and continue navigation
+    }
     router.push("/login");
   };
 
@@ -200,6 +230,16 @@ export default function CandidateDashboard() {
   if (showProfileForm) {
     return <ProfileForm onSubmit={updateProfile} profileData={profileData || undefined} />;
   }
+
+  const completedSampleInterview = completed
+    .map((row) => row?.interview)
+    .find((interview) => {
+      const title = String(interview?.title || "").toLowerCase();
+      return title.includes("sample") || title.includes("test");
+    });
+  const persistentSampleInterview =
+    sampleInterviewTile || (completedSampleInterview ? buildSampleTile(completedSampleInterview) : null);
+  const pendingCount = pendingInterviews.length + (persistentSampleInterview ? 1 : 0);
 
   return (
     <Suspense fallback={<LoadingSpinner message="Loading..." theme={theme} />}>
@@ -316,17 +356,46 @@ export default function CandidateDashboard() {
 
           {/* Quick Stats */}
           <div className="grid grid-cols-3 gap-4 mb-8">
-            <StatCard value={pendingInterviews.length} label="Pending" color="blue" theme={theme} />
+            <StatCard value={pendingCount} label="Pending" color="blue" theme={theme} />
             <StatCard value={completed.length} label="Completed" color="emerald" theme={theme} />
-            <StatCard value={Math.round((completed.length / (pendingInterviews.length + completed.length || 1)) * 100)} label="% Complete" color="indigo" theme={theme} />
+            <StatCard value={Math.round((completed.length / (pendingInterviews.length + completed.length + (persistentSampleInterview ? 1 : 0) || 1)) * 100)} label="% Complete" color="indigo" theme={theme} />
           </div>
 
+          {persistentSampleInterview && (
+            <div className="mb-6 rounded-xl border border-blue-500/30 bg-blue-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p className={`font-medium ${t.textPrimary}`}>Permanent sample interview for testing</p>
+                <p className={`text-sm ${t.textSecondary}`}>{persistentSampleInterview.title}</p>
+              </div>
+              <button
+                onClick={() => router.push(`/candidates/interview?interview_id=${persistentSampleInterview.id}`)}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors"
+              >
+                Start Sample Interview
+              </button>
+            </div>
+          )}
+
           {/* Tab Content */}
-          {activeTab === "pending" && <PendingInterviewsSection interviews={pendingInterviews} theme={theme} t={t} />}
+          {activeTab === "pending" && (
+            <PendingInterviewsSection
+              interviews={pendingInterviews}
+              sampleInterviewTile={persistentSampleInterview}
+              theme={theme}
+              t={t}
+            />
+          )}
 
           {activeTab === "completed" && <CompletedInterviewsSection completed={completed} onInterviewClick={setOpenIdx} isLoading={isLoadingData} theme={theme} t={t} />}
 
-          {activeTab === "stats" && <StatsSection pendingCount={pendingInterviews.length} completedCount={completed.length} theme={theme} t={t} />}
+          {activeTab === "stats" && (
+            <StatsSection
+              pendingCount={pendingCount}
+              completedCount={completed.length}
+              theme={theme}
+              t={t}
+            />
+          )}
         </main>
 
         {/* Modals */}
@@ -365,8 +434,19 @@ function StatCard({ value, label, color, theme }: { value: number; label: string
   );
 }
 
-function PendingInterviewsSection({ interviews, theme, t }: { interviews: PendingInterview[]; theme: Theme; t: any }) {
+function PendingInterviewsSection({
+  interviews,
+  sampleInterviewTile,
+  theme,
+  t,
+}: {
+  interviews: PendingInterview[];
+  sampleInterviewTile: PendingInterview | null;
+  theme: Theme;
+  t: any;
+}) {
   const router = useRouter();
+  const displayInterviews = sampleInterviewTile ? [sampleInterviewTile, ...interviews] : interviews;
 
   const handleStartInterview = (interviewId: string) => {
     router.push(`/candidates/interview?interview_id=${interviewId}`);
@@ -382,11 +462,11 @@ function PendingInterviewsSection({ interviews, theme, t }: { interviews: Pendin
         </div>
         <div>
           <h2 className={`text-lg font-semibold ${t.textPrimary}`}>Pending Interviews</h2>
-          <p className={`text-xs ${t.textMuted}`}>{interviews.length} interviews awaiting</p>
+          <p className={`text-xs ${t.textMuted}`}>{displayInterviews.length} interviews awaiting</p>
         </div>
       </div>
 
-      {interviews.length === 0 ? (
+      {displayInterviews.length === 0 ? (
         <div className={`rounded-xl border p-12 text-center ${t.cardBg}`}>
           <div className={`w-12 h-12 mx-auto mb-4 rounded-xl flex items-center justify-center ${theme === "dark" ? "bg-slate-800/50" : "bg-gray-100"}`}>
             <svg className={`w-6 h-6 ${t.textMuted}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -398,12 +478,19 @@ function PendingInterviewsSection({ interviews, theme, t }: { interviews: Pendin
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 gap-4">
-          {interviews.map((interview, index) => (
+          {displayInterviews.map((interview, index) => {
+            const isSampleTile = sampleInterviewTile?.id === interview.id;
+            return (
             <motion.div key={interview.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} className={`rounded-xl border p-5 transition-all group ${t.cardBg} ${t.cardHover}`}>
               <div className="flex items-start gap-4">
                 <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-semibold text-sm shrink-0">{interview.logo}</div>
                 <div className="flex-1 min-w-0">
                   <h3 className={`font-semibold ${t.textPrimary} truncate`}>{interview.title}</h3>
+                  {isSampleTile && (
+                    <span className="inline-flex mt-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      Practice interview
+                    </span>
+                  )}
                   <p className={`text-sm ${t.textSecondary}`}>{interview.company}</p>
                   <div className={`flex items-center gap-1 mt-1 text-xs ${t.textMuted}`}>
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -421,7 +508,7 @@ function PendingInterviewsSection({ interviews, theme, t }: { interviews: Pendin
                 Start Interview
               </button>
             </motion.div>
-          ))}
+          )})}
         </div>
       )}
     </div>

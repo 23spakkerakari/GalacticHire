@@ -17,7 +17,6 @@ import {
 import { useVideoAnalysis } from "./hooks/useVideoAnalysis";
 import { getBackendUrl } from "@/utils/env";
 import NewInterview from "./components/NewInterview";
-import StarryBackground from '@/components/landing/starry-background';
 
 const supabase = createClient();
 
@@ -31,24 +30,6 @@ export default function RecruitersPage() {
     router.prefetch("/");
     router.prefetch("/recruiters/login");
   }, [router]);
-
-  useEffect(() => {
-    const loadUserAndInterview = async () => {
-      try {
-        const {data : user, error: userError} = await supabase.auth.getUser();
-        if (userError || !user) {
-          console.error("Error getting user:", userError);
-          return;
-        }
-        setCurrentUserId(user.user.id);
-        console.log("Current user ID:", currentUserId);
-        const {data : interview, error: interviewError} = await supabase.from("interview").select("id").contains("recruiter_id", [currentUserId]).order("created_at", {ascending: false})
-      } catch (error) {
-        console.error("Error loading user and interview:", error);
-        return;
-      }
-    } 
-  }, []);
 
   const { isLoading, showProfileForm, profileData, userEmail, updateProfile } =
     useRecruiterProfile();
@@ -130,7 +111,9 @@ const sendInvite = async () => {
         } else if (detail && typeof detail === "object") {
           errorMessage = JSON.stringify(detail);
         }
-      } catch {}
+      } catch {
+        // fallback to default error message below
+      }
       throw new Error(errorMessage);
     }
 
@@ -196,6 +179,9 @@ const handleCloseAnalysis = () => {
   useEffect(() => {
     const fetchCandidateInterviews = async () => {
       try {
+        if (!currentUserId) {
+          return;
+        }
         console.log("Fetching interview data from Supabase...");
 
         // First check the connection to Supabase
@@ -219,13 +205,39 @@ const handleCloseAnalysis = () => {
           return;
         }
 
-        // Now attempt to get interview_answers
+        // Load interviews owned by this recruiter so dashboard only shows relevant results.
+        const { data: recruiterInterviews, error: recruiterInterviewsError } = await supabase
+          .from("interview")
+          .select("id, title")
+          .eq("recruiter_id", currentUserId);
+
+        if (recruiterInterviewsError) {
+          console.error("Error fetching recruiter interviews:", recruiterInterviewsError);
+          setCandidateInterviews([]);
+          setLegacyVideos([]);
+          return;
+        }
+
+        const allowedInterviewIds = (recruiterInterviews || []).map((item: any) => String(item.id));
+        const interviewTitleById = new Map(
+          (recruiterInterviews || []).map((item: any) => [String(item.id), item.title || "Untitled Interview"])
+        );
+
+        if (!interviewIdParam && allowedInterviewIds.length === 0) {
+          setCandidateInterviews([]);
+          setLegacyVideos([]);
+          return;
+        }
+
+        // Fetch interview answers scoped to this recruiter's interviews.
         let answersCheckQuery = supabase
           .from("interview_answers")
           .select("*")
-          .limit(1);
+          .order("created_at", { ascending: false });
         if (interviewIdParam) {
           answersCheckQuery = answersCheckQuery.eq("interview_id", interviewIdParam);
+        } else {
+          answersCheckQuery = answersCheckQuery.in("interview_id", allowedInterviewIds);
         }
         const { data: allAnswers, error: answersError } = await answersCheckQuery;
 
@@ -259,26 +271,8 @@ const handleCloseAnalysis = () => {
 
         console.log("Successfully found interview answers table with data");
 
-        // Fetch all distinct user_ids who have interview answers
-        let userIdsQuery = supabase
-          .from("interview_answers")
-          .select("user_id")
-          .limit(100);
-        if (interviewIdParam) {
-          userIdsQuery = userIdsQuery.eq("interview_id", interviewIdParam);
-        }
-        const { data: userIdData, error: userIdError } = await userIdsQuery;
-
-        if (userIdError) {
-          console.error("Error fetching user IDs:", userIdError);
-          fetchLegacyVideos();
-          return;
-        }
-
-        // Get unique user IDs using Set
-        const uniqueUserIds = [
-          ...new Set(userIdData.map((item) => item.user_id)),
-        ];
+        // Get unique user IDs using answer payload
+        const uniqueUserIds = [...new Set(allAnswers.map((item) => item.user_id))];
         console.log(
           `Found ${uniqueUserIds.length} unique candidates with interviews`
         );
@@ -297,60 +291,45 @@ const handleCloseAnalysis = () => {
           return;
         }
 
-        // Fetch candidate profiles for these users
+        // Fetch candidate profiles for these users when available.
         const { data: candidates, error: candidatesError } = await supabase
           .from("profiles")
           .select("*")
           .in("id", uniqueUserIds);
 
-        if (candidatesError || !candidates || candidates.length === 0) {
+        if (candidatesError) {
           console.error("Error fetching candidate profiles:", candidatesError);
-          if (!interviewIdParam) {
-            console.log("Falling back to legacy method due to profiles error");
-            fetchLegacyVideos();
-          } else {
-            setCandidateInterviews([]);
-            setLegacyVideos([]);
-          }
-          return;
         }
 
-        console.log(`Found ${candidates.length} candidate profiles`);
+        const profilesById = new Map((candidates || []).map((candidate: any) => [candidate.id, candidate]));
+        console.log(`Found ${candidates?.length || 0} candidate profiles`);
 
-        // For each candidate, fetch their interview answers
+        // Group answers by candidate and keep sample/test interview labels visible.
         const candidateInterviewsData: CandidateInterview[] = [];
         const videoObjects: Video[] = [];
-
-        for (const candidate of candidates) {
-          let answersQuery = supabase
-            .from("interview_answers")
-            .select("*")
-            .eq("user_id", candidate.id)
-            .order("created_at", { ascending: false });
-          if (interviewIdParam) {
-            answersQuery = answersQuery.eq("interview_id", interviewIdParam);
+        const answersByCandidate = new Map<string, any[]>();
+        for (const answer of allAnswers) {
+          const key = String(answer.user_id);
+          if (!answersByCandidate.has(key)) {
+            answersByCandidate.set(key, []);
           }
-          const { data: answers, error: answersError } = await answersQuery;
+          answersByCandidate.get(key)!.push(answer);
+        }
 
-          if (answersError || !answers || answers.length === 0) {
-            console.log(
-              `No answers found for candidate ${candidate.id}, skipping`
-            );
-            continue;
-          }
+        for (const [candidateId, answers] of answersByCandidate.entries()) {
+          const candidate = profilesById.get(candidateId);
+          if (!answers || answers.length === 0) continue;
 
-          console.log(
-            `Found ${answers.length} answers for candidate ${candidate.id}`
-          );
+          const firstAnswer = answers[0];
+          const interviewLabel = interviewTitleById.get(String(firstAnswer.interview_id)) || "Interview";
 
-          // Process the answers
           const candidateDetails: CandidateDetails = {
-            id: candidate.id,
-            full_name: candidate.full_name || "Unknown Candidate",
-            email: candidate.email || "",
-            phone: candidate.phone || "",
-            experience: candidate.experience || "",
-            linkedin: candidate.linkedin || "",
+            id: candidateId,
+            full_name: candidate?.full_name || `Candidate ${candidateId.slice(0, 8)}`,
+            email: candidate?.email || "",
+            phone: candidate?.phone || "",
+            experience: candidate?.experience || "",
+            linkedin: candidate?.linkedin || "",
           };
 
           const processedAnswers: InterviewAnswer[] = answers.map((answer) => {
@@ -380,7 +359,7 @@ const handleCloseAnalysis = () => {
 
           // Add candidate interview data
           candidateInterviewsData.push({
-            candidate_id: candidate.id,
+            candidate_id: candidateId,
             candidate_details: candidateDetails,
             answers: processedAnswers,
             created_at: answers[0].created_at,
@@ -390,10 +369,12 @@ const handleCloseAnalysis = () => {
           // Create a legacy Video object for the candidate (using the first answer's video)
           // This is needed for compatibility with the existing Dashboard component
           videoObjects.push({
-            id: candidate.id,
-            title: `${candidateDetails.full_name}'s Interview`,
-            url: answers[0].video_url,
-            created_at: answers[0].created_at,
+            id: candidateId,
+            title: `${candidateDetails.full_name} - ${interviewLabel}`,
+            url: firstAnswer.video_url,
+            created_at: firstAnswer.created_at,
+            interview_id: firstAnswer.interview_id,
+            interview_title: interviewLabel,
             candidate_details: candidateDetails,
           });
         }
@@ -457,7 +438,7 @@ const handleCloseAnalysis = () => {
     };
 
     fetchCandidateInterviews();
-  }, [interviewIdParam]);
+  }, [interviewIdParam, currentUserId]);
 
   // Get current user ID
   useEffect(() => {
@@ -484,7 +465,9 @@ const handleCloseAnalysis = () => {
         if (!error && data?.id) {
           setCurrentInterviewId(data.id);
         }
-      } catch {}
+      } catch {
+        // best-effort lookup for latest interview id
+      }
     };
     if (!currentInterviewId) {
       fetchLatestInterviewId();

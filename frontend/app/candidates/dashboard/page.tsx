@@ -10,6 +10,9 @@ import { useProfile } from "@/hooks/useProfile";
 import { ProfileForm } from "../components/ProfileForm";
 import { useCandidateOnboardingStep } from '@/hooks/useCandidateOnboardingStep';
 import AddInterviewModal from "../components/AddInterviewModal";
+import { ensureLatestSampleInterviewParticipant } from "../utils/sampleInterview";
+import { getLatestSampleInterview } from "../utils/sampleInterview";
+import { ProfileFormData } from "@/types/candidate";
 
 export default function CandidateDashboard() {
   const [activeTab, setActiveTab] = useState("pending");
@@ -23,11 +26,26 @@ export default function CandidateDashboard() {
   const { isLoading, showProfileForm, profileData, updateProfile } = useProfile();
   const { loading, step, redirectIfNeeded } = useCandidateOnboardingStep();
   const [pendingInterviews, setPendingInterviews] = useState<any[]>([]);
+  const [samplePracticeInterview, setSamplePracticeInterview] = useState<any | null>(null);
+
+  const buildSampleTile = (interview: any) => ({
+    id: interview.id,
+    title: interview.title || "Sample Interview",
+    scheduledDate: interview.scheduled_date || "Always available",
+    company: interview.company || "Practice",
+    logo: (interview.company || "S").charAt(0).toUpperCase(),
+  });
+
+  const handleSubmitProfile = async (formData: ProfileFormData): Promise<void> => {
+    await updateProfile(formData);
+  };
 
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-    } catch {}
+    } catch {
+      // ignore sign-out errors and continue navigation
+    }
     router.push("/login");
   };
 
@@ -100,6 +118,19 @@ export default function CandidateDashboard() {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (!userId) return;
+      await ensureLatestSampleInterviewParticipant(supabase, userId);
+      const sampleInterview = await getLatestSampleInterview(supabase);
+      const sampleTile = sampleInterview
+        ? {
+            id: sampleInterview.id,
+            title: sampleInterview.title || "Sample Interview",
+            scheduledDate: sampleInterview.scheduled_date || "Always available",
+            company: sampleInterview.company || "Practice",
+            logo: (sampleInterview.company || "S").charAt(0).toUpperCase(),
+          }
+        : null;
+      setSamplePracticeInterview(sampleTile);
+
       // Fetch interviews the user is a participant in and are not completed
       const { data, error } = await supabase
         .from("interview_participants")
@@ -108,18 +139,19 @@ export default function CandidateDashboard() {
         .eq("completed", false);
       if (error) {
         console.error("pending‑fetch", error);
-        setPendingInterviews([
-          {
-            id: "sample-1",
-            title: "Sample Interview",
-            scheduledDate: "April 30, 2025",
-            company: "SampleCorp",
-            logo: "S",
-          },
-        ]);
+        setPendingInterviews(sampleTile ? [sampleTile] : []);
       } else {
+        // Refetch pending interviews after ensuring sample participant row.
+        const pendingResult = await supabase
+          .from("interview_participants")
+          .select("interview:interview_id(*), status")
+          .eq("user_id", userId)
+          .eq("completed", false);
+
+        const pendingRows = pendingResult.data || data || [];
+
         // Map to PendingInterview shape
-        const mapped = (data || []).map((row: any) => {
+        const mapped = pendingRows.map((row: any) => {
           const interview = row.interview;
           return {
             id: interview.id,
@@ -129,16 +161,8 @@ export default function CandidateDashboard() {
             logo: (interview.company || "?").charAt(0).toUpperCase(),
           };
         });
-        setPendingInterviews([
-          {
-            id: "sample-1",
-            title: "Sample Interview",
-            scheduledDate: "April 30, 2025",
-            company: "SampleCorp",
-            logo: "S",
-          },
-          ...mapped,
-        ]);
+        const withoutSample = mapped.filter((item: any) => item.id !== sampleTile?.id);
+        setPendingInterviews(sampleTile ? [sampleTile, ...withoutSample] : withoutSample);
       }
     };
     fetchPending();
@@ -186,9 +210,21 @@ export default function CandidateDashboard() {
 
   if (showProfileForm) {
     return (
-      <ProfileForm onSubmit={updateProfile} profileData={profileData || undefined} />
+      <ProfileForm onSubmit={handleSubmitProfile} profileData={profileData || undefined} />
     );
   }
+
+  const completedSampleInterview = completed
+    .map((row) => row?.interview)
+    .find((interview) => {
+      const title = String(interview?.title || "").toLowerCase();
+      return title.includes("sample") || title.includes("test");
+    });
+  const persistentSampleInterview =
+    samplePracticeInterview || (completedSampleInterview ? buildSampleTile(completedSampleInterview) : null);
+  const pendingWithSample = persistentSampleInterview
+    ? [persistentSampleInterview, ...pendingInterviews.filter((item) => item.id !== persistentSampleInterview.id)]
+    : pendingInterviews;
 
   return (
     <Suspense fallback={<LoadingFallback />}>
@@ -287,9 +323,30 @@ export default function CandidateDashboard() {
           {/* Navigation Menu */}
           <NavigationMenu activeTab={activeTab} setActiveTab={setActiveTab} />
 
+          {persistentSampleInterview && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-5xl mx-auto mt-5 mb-4"
+            >
+              <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-white font-medium">Permanent sample interview for testing</p>
+                  <p className="text-blue-200 text-sm">{persistentSampleInterview.title}</p>
+                </div>
+                <button
+                  onClick={() => router.push(`/candidates/interview?interview_id=${persistentSampleInterview.id}`)}
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+                >
+                  Start Sample Interview
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           {/* Tab Content */}
           {activeTab === "pending" && (
-            <PendingInterviews pendingInterviews={pendingInterviews} />
+            <PendingInterviews pendingInterviews={pendingWithSample} />
           )}
 
           {activeTab === "completed" && (

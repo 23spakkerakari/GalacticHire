@@ -1,6 +1,5 @@
 import React from "react";
 import Navbar from "@/components/navbar";
-import Hero from "@/components/landing/hero";
 import Features from "@/components/landing/features";
 import HowItWorks from "@/components/landing/how-it-works";
 import Testimonials from "@/components/landing/testimonials";
@@ -9,6 +8,7 @@ import Cta from "@/components/landing/cta";
 import Footer from "@/components/landing/footer";
 import ScrollToTop from "@/components/landing/scroll-to-top";
 import StarryBackground from "@/components/landing/starry-background";
+import { GlowyWavesHero } from "@/components/ui/glowy-waves-hero-shadcnui";
 import { Suspense } from "react";
 import Loading from "./loading";
 import Error from "./error";
@@ -26,7 +26,7 @@ export default async function Home() {
       <div className="pt-24 relative z-10">
         <Suspense fallback={<Loading />}>
           <Error>
-            <Hero />
+            <GlowyWavesHero />
             <Features />
             <HowItWorks />
             <Testimonials />

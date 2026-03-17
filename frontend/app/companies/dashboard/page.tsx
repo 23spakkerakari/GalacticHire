@@ -37,7 +37,7 @@ export default function Dashboard() {
             <ul>
               <li>
                 <Link
-                  href="/dashboard"
+                  href="/companies/dashboard"
                   className="block px-4 py-3 text-gray-700 hover:bg-gray-200"
                 >
                   Dashboard
@@ -53,7 +53,7 @@ export default function Dashboard() {
               </li>
               <li>
                 <Link
-                  href="/companies/manage"
+                  href="/companies/dashboard"
                   className="block px-4 py-3 text-gray-700 hover:bg-gray-200"
                 >
                   Companies

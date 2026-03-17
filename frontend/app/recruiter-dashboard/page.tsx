@@ -16,6 +16,49 @@ type Interview = {
   status?: string | null;
 };
 
+type InterviewTileProps = {
+  title: string;
+  description?: string | null;
+  createdAt?: string | null;
+  href: string;
+};
+
+function InterviewTile({ title, description, createdAt, href }: InterviewTileProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="group bg-white/80 backdrop-blur-md border border-gray-200/80 rounded-xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 relative overflow-hidden"
+    >
+      <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-gradient-to-br from-pink-400/20 via-yellow-400/20 to-green-400/20 blur-2xl" />
+
+      <h4 className="text-lg font-semibold text-gray-800">
+        {title}
+      </h4>
+      {createdAt && (
+        <p className="text-sm text-gray-500 mt-1">
+          {new Date(createdAt).toLocaleString()}
+        </p>
+      )}
+
+      {description && (
+        <p className="text-gray-700 mt-3 line-clamp-3">
+          {description}
+        </p>
+      )}
+      <div className="mt-4 flex gap-3">
+        <Link
+          href={href}
+          className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm shadow-sm ring-1 ring-blue-500/20 hover:ring-blue-500/40 transition"
+        >
+          Open
+        </Link>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function RecruiterDashboardPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -142,10 +185,10 @@ export default function RecruiterDashboardPage() {
             </li>
             <li>
               <Link
-                href="/account"
+                href="/recruiters"
                 className="block px-4 py-3 text-gray-700 hover:bg-gray-200"
               >
-                Account
+                Recruiter Workspace
               </Link>
             </li>
             <li>
@@ -203,45 +246,26 @@ export default function RecruiterDashboardPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {interviews.map((iv) => {
-                const date = iv.created_at || undefined;
                 return (
-                  <motion.div
+                  <InterviewTile
                     key={iv.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="group bg-white/80 backdrop-blur-md border border-gray-200/80 rounded-xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 relative overflow-hidden"
-                  >
-                    {/* subtle corner accent */}
-                    <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-gradient-to-br from-pink-400/20 via-yellow-400/20 to-green-400/20 blur-2xl" />
-
-                    <h4 className="text-lg font-semibold text-gray-800">
-                      {iv.title || "Untitled Interview"}
-                    </h4>
-                    {date && (
-                      <p className="text-sm text-gray-500 mt-1">
-                        {new Date(date).toLocaleString()}
-                      </p>
-                    )}
-                    
-                    {iv.description && (
-                      <p className="text-gray-700 mt-3 line-clamp-3">
-                        {iv.description}
-                      </p>
-                    )}
-                    <div className="mt-4 flex gap-3">
-                      <Link
-                        href={`/recruiters?interview=${iv.id}`}
-                        className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm shadow-sm ring-1 ring-blue-500/20 hover:ring-blue-500/40 transition"
-                      >
-                        Open
-                      </Link>
-                    </div>
-                  </motion.div>
+                    title={iv.title || "Untitled Interview"}
+                    description={iv.description}
+                    createdAt={iv.created_at}
+                    href={`/recruiters?interview=${iv.id}`}
+                  />
                 );
               })}
             </div>
           )}
+
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <InterviewTile
+              title="Sample Interview"
+              description="Open the reusable sample interview flow for testing and review."
+              href="/recruiter-dashboard/sample-interview"
+            />
+          </div>
         </section>
       </div>
     </div>

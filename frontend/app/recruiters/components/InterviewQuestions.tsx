@@ -13,6 +13,12 @@ interface InterviewQuestionsProps {
   theme?: "dark" | "light";
 }
 
+const TEST_INTERVIEW_FALLBACK_QUESTIONS = [
+  "Tell me about yourself and what excites you most about this role.",
+  "Describe a challenging project you worked on and how you approached solving it.",
+  "Why do you want to join our company, and what impact do you hope to make in your first 90 days?",
+];
+
 export default function InterviewQuestions({ recruiterId, theme = "dark" }: InterviewQuestionsProps) {
   const supabase = createClient();
 
@@ -51,7 +57,7 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
         setInterviews(rows);
         if (rows.length > 0 && !selectedInterviewId) {
           setSelectedInterviewId(rows[0].id);
-          const { list, usesObjects } = normalizeQuestions(rows[0].questions);
+          const { list, usesObjects } = getDisplayQuestions(rows[0]);
           setQuestions(list);
           setUseObjectQuestions(usesObjects);
         }
@@ -65,7 +71,7 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
     if (!selectedInterviewId) return;
     const row = interviews.find((i) => i.id === selectedInterviewId);
     if (!row) return;
-    const { list, usesObjects } = normalizeQuestions(row.questions);
+    const { list, usesObjects } = getDisplayQuestions(row);
     setQuestions(list);
     setUseObjectQuestions(usesObjects);
   }, [selectedInterviewId, interviews]);
@@ -84,6 +90,18 @@ export default function InterviewQuestions({ recruiterId, theme = "dark" }: Inte
       .map((q) => (typeof q === "string" ? q : ""))
       .filter((q) => q.trim().length > 0);
     return { list, usesObjects: false };
+  };
+
+  const getDisplayQuestions = (row: InterviewRow) => {
+    const normalized = normalizeQuestions(row.questions);
+    const lowerTitle = (row.title || "").toLowerCase();
+    const looksLikeTestInterview = lowerTitle.includes("sample") || lowerTitle.includes("test");
+
+    if (looksLikeTestInterview && normalized.list.length === 0) {
+      return { list: TEST_INTERVIEW_FALLBACK_QUESTIONS, usesObjects: false };
+    }
+
+    return normalized;
   };
 
   const persistQuestions = async (nextQuestions: string[]) => {

@@ -22,10 +22,9 @@ def summarize_text(text):
             "Line 3 — Risks (≤2): label + 6–10 word evidence from transcript." +
             "Line 4 — Scores: Customer Empathy / Communication / Conflict Resolution / Assertiveness (1–5) with 3–5 word reasons." +
             "Line 5 — Follow-ups (1–2): targeted, behavior-anchored questions (“What would you say next?”)." +
-            "Here is the transcript:" +
-            text
+            "Here is the transcript."
             },
-            {"role": "user"}
+            {"role": "user", "content": text}
         ],
         max_completion_tokens=150
     )
@@ -54,7 +53,7 @@ def analyze_communication(transcript):
     print("Communication Analysis:", response.choices[0].message.content)
     
     # Clean the response content to handle markdown formatting
-    content = response.choices[0].message.content.strip()
+    content = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
     
     # Remove markdown code block markers if present
     if content.startswith('```json'):
@@ -98,7 +97,7 @@ def generate_behavioral_insights(transcript, job_description):
     )
     print("Behavioral Insights:", response.choices[0].message.content)
     # Clean the response content to handle markdown formatting
-    content = response.choices[0].message.content.strip()
+    content = (response.choices[0].message.content or "").strip()
     
     # Remove markdown code block markers if present
     if content.startswith('```json'):

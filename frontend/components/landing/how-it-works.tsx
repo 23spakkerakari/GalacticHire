@@ -1,155 +1,160 @@
 "use client";
+import {
+  ArrowRight,
+  Brain,
+  Camera,
+  FileSearch,
+  MessageCircleMore,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import React from "react";
 import Link from "next/link";
 
+import { Button } from "@/components/ui/button";
+
 interface Step {
+  step: string;
+  eyebrow: string;
   title: string;
   description: string;
-  icon: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
+  className: string;
 }
 
 const HowItWorks = () => {
-  // How it works steps
   const steps: Step[] = [
     {
+      step: "01",
+      eyebrow: "Capture",
       title: "Upload or Record",
       description:
-        "Upload existing interviews or conduct them directly on the platform",
-      icon: (
-        <svg
-          className="w-10 h-10 text-orange-500"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-          />
-        </svg>
-      ),
+        "Start from a live session or upload an existing recording without changing your team's hiring workflow.",
+      icon: Camera,
+      className: "md:col-span-3",
     },
     {
+      step: "02",
+      eyebrow: "Analyze",
       title: "AI Analysis",
-      description: "Our AI processes emotions, skills, and behavioral patterns",
-      icon: (
-        <svg
-          className="w-10 h-10 text-orange-500"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-          />
-        </svg>
-      ),
+      description:
+        "Behavioral patterns, communication quality, and confidence signals are processed automatically in the background.",
+      icon: Brain,
+      className: "md:col-span-3",
     },
     {
+      step: "03",
+      eyebrow: "Review",
       title: "Recruiter Insights",
-      description: "Get comprehensive breakdown of candidate performance",
-      icon: (
-        <svg
-          className="w-10 h-10 text-orange-500"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          />
-        </svg>
-      ),
+      description:
+        "Recruiters get a structured workspace with summaries, side-by-side comparisons, and candidate-level analytics.",
+      icon: FileSearch,
+      className: "md:col-span-3",
     },
     {
+      step: "04",
+      eyebrow: "Improve",
       title: "Candidate Feedback",
-      description: "Candidates receive actionable feedback to improve",
-      icon: (
-        <svg
-          className="w-10 h-10 text-orange-500"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-          />
-        </svg>
-      ),
+      description:
+        "Candidates receive transparent, actionable feedback that makes practice interviews and real interviews more valuable.",
+      icon: MessageCircleMore,
+      className: "md:col-span-3",
     },
   ];
 
   return (
-    <section id="how-it-works" className="relative z-10 py-20 px-6">
+    <section id="how-it-works" className="relative z-10 px-6 py-24">
       <div className="max-w-6xl mx-auto">
-        <h2 className="text-4xl font-bold mb-3 text-center">How It Works</h2>
-        <p className="text-xl text-gray-400 text-center mb-16">
-          Streamlined process from interview to insights
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {steps.map((step, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              className="relative"
-            >
-              <div className="bg-[#1A2333] p-6 rounded-xl text-center h-full flex flex-col items-center">
-                <div className="mb-4 p-4 bg-[#2A3343] rounded-full">
-                  {step.icon}
-                </div>
-                <div className="absolute top-4 right-4 w-8 h-8 rounded-full bg-[#F48C06] flex items-center justify-center font-bold">
-                  {index + 1}
-                </div>
-                <h3 className="text-xl font-semibold mb-2">{step.title}</h3>
-                <p className="text-gray-400">{step.description}</p>
-              </div>
-
-              {/* Connector line (except for last item) */}
-              {index < steps.length - 1 && (
-                <div className="hidden lg:block absolute top-1/2 -right-3 w-6 h-0.5 bg-[#F48C06]"></div>
-              )}
-            </motion.div>
-          ))}
+        <div className="mx-auto mb-14 max-w-3xl text-center">
+          <div className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white/70 backdrop-blur">
+            How It Works
+          </div>
+          <h2 className="mb-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+            A smooth path from interview capture to candidate intelligence
+          </h2>
+          <p className="text-lg text-gray-400 md:text-xl">
+            The process stays simple for teams, clear for candidates, and
+            structured to produce better hiring decisions.
+          </p>
         </div>
 
-        <div className="text-center mt-10">
-          <Link href="/learn-more">
-            <motion.span
-              whileHover={{ scale: 1.05 }}
-              className="text-[#F48C06] font-medium cursor-pointer inline-flex items-center"
-            >
-              Learn More
-              <svg
-                className="w-4 h-4 ml-2"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-6">
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-80px" }}
+            transition={{ duration: 0.55 }}
+            className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl transition-all duration-300 hover:border-[#F48C06]/30 hover:bg-white/[0.06] md:col-span-6 md:p-8"
+          >
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,140,6,0.16),transparent_38%)] opacity-80 transition-opacity duration-300 group-hover:opacity-100" />
+
+            <div className="relative z-10 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl space-y-4">
+                <div className="inline-flex items-center rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/60">
+                  Workflow Overview
+                </div>
+                <h3 className="text-3xl font-semibold text-white md:text-4xl">
+                  Hiring analysis that feels built in, not bolted on
+                </h3>
+                <p className="text-base leading-7 text-gray-400">
+                  GalacticHire transforms interview recordings into structured
+                  intelligence, then routes that intelligence back to recruiters
+                  and candidates in a way that is easy to use and easy to trust.
+                </p>
+              </div>
+
+              <Link href="/learn-more">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="group/btn rounded-full px-6 uppercase tracking-[0.18em]"
+                >
+                  Learn More
+                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
+                </Button>
+              </Link>
+            </div>
+          </motion.div>
+
+          {steps.map((step, index) => {
+            const Icon = step.icon;
+
+            return (
+              <motion.div
+                key={step.step}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-80px" }}
+                transition={{ duration: 0.55, delay: 0.08 + index * 0.08 }}
+                className={`group relative overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-[#F48C06]/30 hover:bg-white/[0.06] md:p-8 ${step.className}`}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </motion.span>
-          </Link>
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,140,6,0.16),transparent_38%)] opacity-80 transition-opacity duration-300 group-hover:opacity-100" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[#F48C06]/40 to-transparent opacity-60" />
+
+                <div className="relative z-10 flex h-full flex-col gap-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="rounded-2xl border border-white/10 bg-[#F48C06]/10 p-3 text-[#F48C06]">
+                      <Icon className="h-6 w-6" />
+                    </div>
+                    <div className="rounded-full border border-[#F48C06]/30 bg-[#F48C06]/10 px-3 py-1 text-xs font-semibold tracking-[0.24em] text-[#F48C06]">
+                      {step.step}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="text-xs uppercase tracking-[0.24em] text-white/45">
+                      {step.eyebrow}
+                    </div>
+                    <h3 className="text-2xl font-semibold text-white">
+                      {step.title}
+                    </h3>
+                    <p className="text-base leading-7 text-gray-400">
+                      {step.description}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
     </section>

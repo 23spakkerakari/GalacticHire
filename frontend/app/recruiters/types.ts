@@ -26,6 +26,8 @@ export interface Video {
   title: string;
   url: string;
   created_at?: string;
+  interview_id?: string | number;
+  interview_title?: string;
   candidate_details?: CandidateDetails;
 }
 
