@@ -41,7 +41,7 @@ export const useProfile = () => {
     fetchUserData();
   }, []);
 
-  const updateProfile = async (formData: ProfileFormData) => {
+  const updateProfile = async (formData: ProfileFormData): Promise<void> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -53,11 +53,13 @@ export const useProfile = () => {
         updated_at: new Date().toISOString(),
       });
 
-    if (!error) {
-      setProfileData(formData);
-      setShowProfileForm(false);
+    if (error) {
+      console.error('Error updating profile:', error.message);
+      return;
     }
-    return error;
+
+    setProfileData(formData);
+    setShowProfileForm(false);
   };
 
   const updateVideoUrl = async (filename: string) => {

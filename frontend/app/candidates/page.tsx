@@ -227,8 +227,12 @@ export default function CandidateDashboard() {
     return <LoadingSpinner message="Loading Dashboard..." theme={theme} />;
   }
 
+  const handleProfileSubmit = async (formData: ProfileFormData): Promise<void> => {
+    await updateProfile(formData);
+  };
+
   if (showProfileForm) {
-    return <ProfileForm onSubmit={updateProfile} profileData={profileData || undefined} />;
+    return <ProfileForm onSubmit={handleProfileSubmit} profileData={profileData || undefined} />;
   }
 
   const completedSampleInterview = completed
