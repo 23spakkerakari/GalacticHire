@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { createClient } from "@/utils/auth";
 import { useProfile } from "@/hooks/useProfile";
+import type { ProfileFormData } from "@/types/candidate";
 import { ProfileForm } from "./components/ProfileForm";
 import { useCandidateOnboardingStep } from "@/hooks/useCandidateOnboardingStep";
 import InterviewDetailsModal from "./dashboard/components/InterviewDetailsModal";
