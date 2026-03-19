@@ -91,3 +91,8 @@ export type FilterChangeHandler = (
   filterType: keyof FilterOptions,
   value: any
 ) => void;
+
+export interface EmotionFrame {
+  timestamp: number;
+  emotions: Record<string, number>;
+}
