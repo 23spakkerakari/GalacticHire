@@ -3,7 +3,6 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import json
-import spacy
 
 load_dotenv()
 
@@ -81,7 +80,7 @@ def generate_behavioral_insights(transcript, job_description):
         "Ensure the attributes you select are unique, relevant to the job description, and avoid clichés or generic statements.\n\n"
         "Output the selected statements as short, punchy insights preceded by a relevant emoji."
         f"Here is the transcript:\n{transcript}\n\n" 
-        "Here is the job description:\n{job_description}\n\n"
+        f"Here is the job description:\n{job_description}\n\n"
         "Format the output as a JSON object with a single key 'insights' which is an array of strings. For example:\n"
         '{"insights": ["🎤 Presented at a major conference", "🎸 Plays in a band on weekends"]}'
     )
