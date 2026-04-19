@@ -75,16 +75,27 @@ def analyze_communication(transcript):
 
 def generate_behavioral_insights(transcript, job_description):
     prompt = (
-        "You are a talent scout reviewing a transcript from a video interview. " \
-        "Your primary objective is to identify 2-4 distinctive attributes of the candidate that relate closely to the provided job description." \
-        "Ensure the attributes you select are unique, relevant to the job description, and avoid clichés or generic statements.\n\n"
-        "Output the selected statements as short, punchy insights preceded by a relevant emoji."
-        f"Here is the transcript:\n{transcript}\n\n" 
-        f"Here is the job description:\n{job_description}\n\n"
-        "Format the output as a JSON object with a single key 'insights' which is an array of strings. For example:\n"
-        '{"insights": ["🎤 Presented at a major conference", "🎸 Plays in a band on weekends"]}'
-    )
+    "You are an experienced talent scout reviewing a video interview transcript. "
+    "Your goal is to surface 2-4 distinctive, memorable candidate attributes that signal strong fit for the role.\n\n"
 
+    "## Guidelines\n"
+    "- **Relevance**: Each insight must map directly to a specific skill, responsibility, or quality in the job description.\n"
+    "- **Specificity**: Pull concrete evidence from the transcript (e.g. a project, result, or behavior) — never infer or invent.\n"
+    "- **Distinctiveness**: Highlight what makes this candidate stand out. Avoid generic praise like 'team player' or 'hard worker'.\n"
+    "- **Tone**: Short, punchy, and human — written like a recruiter's handwritten note, not a performance review.\n"
+    "- **Emoji**: Prefix each insight with a single relevant emoji that reinforces the point.\n\n"
+
+    "## Inputs\n"
+    f"**Job Description:**\n{job_description}\n\n"
+    f"**Interview Transcript:**\n{transcript}\n\n"
+
+    "## Output Format\n"
+    "Return a JSON object with a single key 'insights' containing an array of 2-4 strings. "
+    "Each string should be one sentence max.\n\n"
+    "Good example: {\"insights\": [\"🚀 Led a team that shipped 3 products in 12 months\", \"📊 Built pricing models used by Fortune 500 clients\"]}\n"
+    "Bad example: {\"insights\": [\"💼 Strong communicator\", \"🤝 Works well with others\"]}\n\n"
+    "Return only valid JSON. No explanation, no markdown wrapper."
+)
     response = client.chat.completions.create(
         model="gpt-5-mini",
         messages=[
