@@ -1,44 +1,45 @@
 """Fetch Google search result URLs via the Custom Search JSON API."""
 
 import os
-
+import json
 import requests
+from dotenv import load_dotenv
 
-# ---------------------------------------------------------------------------
-# Set these via environment variables or replace the empty strings directly.
-# Get them at: https://developers.google.com/custom-search/v1/introduction
-# ---------------------------------------------------------------------------
-API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-CSE_ID  = os.environ.get("GOOGLE_CSE_ID", "")
+load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))  
+
+API_KEY = os.environ.get("SERPER_API_KEY", "")
+
+def zoominfo_scraper(query: str):
+    url = "https://www.zoominfo.com/p/akella-rithvik/347863680"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    response = requests.get(url, headers=headers)
+    return response.text
+
+def search_google(query: str, limit: int = 10):
+    url = "https://google.serper.dev/search"
+    payload = {
+        "q" : query
+    }
+    headers = {
+        "X-API-KEYb ": API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    response = requests.request("POST", url, json=payload, headers=headers)
+
+    with open("./backend/tester/out.json", "w", encoding="utf-8") as f:
+        json.dump(response.json(), f, ensure_ascii=False, indent=4)
+    return response.text
 
 
-def search_google(query: str, limit: int = 10) -> list[str]:
-    """Return up to `limit` result URLs from Google Custom Search JSON API.
+def load_json(file_path: str):
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data
 
-    Requires GOOGLE_API_KEY and GOOGLE_CSE_ID to be set.
-    Free tier: 100 queries / day  (https://programmablesearch.google.com)
-    """
-    if not API_KEY or not CSE_ID:
-        raise EnvironmentError(
-            "Set GOOGLE_API_KEY and GOOGLE_CSE_ID environment variables. "
-            "See https://developers.google.com/custom-search/v1/introduction"
-        )
 
-    print("API Key Good")
-
-    response = requests.get(
-        "https://www.googleapis.com/customsearch/v1", 
-        params={"key": API_KEY, "cx": CSE_ID, "q": query, "num":min(limit, 10)},
-        timeout=15
-    )
-    
-    response.raise_for_status()
-    items = response.json().get('items') or []
-    if not items: print("Results came up empty")
-    print(f"\nITEMS:\n{items}\n\n")
-    return [item["link"] for item in items if "link" in item]
-
-    
 def main():
     query = "Rithvik Akella"
     results = search_google(query)
