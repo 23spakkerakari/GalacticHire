@@ -29,7 +29,7 @@ interface QuestionCachePayload {
   updatedAt: string;
 }
 
-export default function InterviewSession() {
+function InterviewSession() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const interviewId = searchParams.get('interview_id');
@@ -41,6 +41,7 @@ export default function InterviewSession() {
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string>("");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [recordedAnswers, setRecordedAnswers] = useState<Record<number, Blob>>({});
+  const [recordedPublicUrls, setRecordedPublicUrls] = useState<Record<number, string>>({});
   const [isAnswerRecorded, setIsAnswerRecorded] = useState<boolean>(false);
   const [isInterviewFinished, setIsInterviewFinished] = useState<boolean>(false);
   const [isAnalysisComplete, setIsAnalysisComplete] = useState<boolean>(false);
@@ -164,8 +165,19 @@ export default function InterviewSession() {
 
   const fetchInterviewQuestions = async () => {
     if (!interviewId) return;
-    const list = await fetchInterviewQuestionList(interviewId);
-    setQuestions(list.length > 0 ? list : SAMPLE_INTERVIEW_FALLBACK_QUESTIONS);
+    const userId = (await supabase.auth.getUser()).data.user?.id || null;
+    if (userId) {
+      const { interviewQuestions, profileQuestions } = await loadAndCacheQuestionSets(userId, interviewId);
+      const selectedQuestions = profileQuestions.length > 0
+        ? profileQuestions
+        : interviewQuestions.length > 0
+          ? interviewQuestions
+          : SAMPLE_INTERVIEW_FALLBACK_QUESTIONS;
+      setQuestions(selectedQuestions);
+    } else {
+      const list = await fetchInterviewQuestionList(interviewId);
+      setQuestions(list.length > 0 ? list : SAMPLE_INTERVIEW_FALLBACK_QUESTIONS);
+    }
     setIsQuestionsLoading(false);
   };
 
@@ -270,11 +282,13 @@ export default function InterviewSession() {
       [currentQuestionIndex]: videoBlob,
     }));
     setIsAnswerRecorded(true);
-    const { signedUrl: newSignedUrl } = await uploadVideo(videoBlob);
+    const { publicUrl, signedUrl: newSignedUrl } = await uploadVideo(videoBlob);
+    if (publicUrl) {
+      setRecordedPublicUrls((prev) => ({ ...prev, [currentQuestionIndex]: publicUrl }));
+    }
     if (newSignedUrl) {
       setSignedUrl(newSignedUrl);
       setTimeout(() => setShowPreview(true), 300);
-      console.log("Preview video URL:", newSignedUrl);
     }
   };
 
@@ -307,13 +321,14 @@ export default function InterviewSession() {
     let failedUploads = 0;
     for (const [questionIndex, videoBlob] of Object.entries(recordedAnswers)) {
       try {
-        const { publicUrl, signedUrl: newSignedUrl, filename } = await uploadVideo(videoBlob);
-        if (publicUrl && newSignedUrl) {
+        const storedPublicUrl = recordedPublicUrls[parseInt(questionIndex)];
+        const publicUrl = storedPublicUrl || (await uploadVideo(videoBlob)).publicUrl;
+        if (publicUrl) {
           const response = await fetch(`${getBackendUrl()}/analyze-video`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              video_url: newSignedUrl,
+              video_url: publicUrl,
               user_id: userId,
               question_index: parseInt(questionIndex),
               question_text: questions[parseInt(questionIndex)],
@@ -437,8 +452,7 @@ export default function InterviewSession() {
   }
 
   return (
-    <Suspense fallback={<div>Loading interview...</div>}>
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black flex flex-col items-center justify-center p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-2xl bg-gray-900/80 rounded-2xl shadow-2xl p-8">
           {!isInterviewStarted ? (
             <div>
@@ -586,7 +600,14 @@ export default function InterviewSession() {
             </div>
           )}
         </div>
-      </div>
+    </div>
+  );
+}
+
+export default function InterviewPage() {
+  return (
+    <Suspense fallback={<div>Loading interview...</div>}>
+      <InterviewSession />
     </Suspense>
   );
-} 
+}

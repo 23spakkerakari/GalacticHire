@@ -25,7 +25,7 @@ export const AudioLevelMeter = ({ stream }: AudioLevelMeterProps) => {
     audioSource.connect(analyser);
 
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = new Uint8Array(new ArrayBuffer(bufferLength));
 
     analyserRef.current = analyser;
     dataArrayRef.current = dataArray;
