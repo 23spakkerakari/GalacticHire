@@ -11,7 +11,7 @@ export const AudioLevelMeter = ({ stream }: AudioLevelMeterProps) => {
   const [isMicActive, setIsMicActive] = useState(false);
   const animationRef = useRef<number>();
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const inactiveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -25,11 +25,9 @@ export const AudioLevelMeter = ({ stream }: AudioLevelMeterProps) => {
     audioSource.connect(analyser);
 
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(new ArrayBuffer(bufferLength));
 
     analyserRef.current = analyser;
-    dataArrayRef.current = dataArray;
-
+    dataArrayRef.current = new Uint8Array(bufferLength) as Uint8Array<ArrayBuffer>;
     const updateAudioLevel = () => {
       if (!analyserRef.current || !dataArrayRef.current) return;
 
