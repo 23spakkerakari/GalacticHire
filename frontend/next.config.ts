@@ -10,10 +10,7 @@ const nextConfig: NextConfig = {
     "d3-time",
     "d3-time-format",
     
-  ],
-  turbopack: {
-    root: __dirname,
-  },
+  ]
 };
 
 export default nextConfig;
