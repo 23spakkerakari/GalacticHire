@@ -1,6 +1,9 @@
 {
   "name": "frontend",
   "version": "0.1.0",
+  "engines": {
+      "node": "20.x"
+  },
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -36,6 +39,7 @@
     "react-transition-group": "^4.4.5",
     "recharts": "^2.12.0"
   },
+  
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
@@ -52,4 +56,5 @@
   "overrides": {
     "react-transition-group": "^4.4.5"
   }
+  
 }

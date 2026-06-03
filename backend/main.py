@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import io
 import re
 import assemblyai as aai  
@@ -179,7 +179,7 @@ def extract_main_themes(transcript: str, num_themes: int = 4) -> list:
     )
 
     response = client.chat.completions.create(
-        model="gpt-5-mini",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You extract concise interview themes."},
             {"role": "user", "content": prompt},
@@ -379,7 +379,7 @@ def _cross_encoder_rerank(requirement: str, experiences: list[dict]) -> list[dic
 
     try:
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a strict JSON formatter."},
                 {"role": "user", "content": prompt},
@@ -615,7 +615,30 @@ def analyze_video(video_url: str, interview_id: str | None = None):
             raise ValueError("Invalid video URL format")
 
         transcript = transcriber.transcribe(video_url)
-        if not transcript or not hasattr(transcript, 'text') or not transcript.text:
+        if transcript is None:
+            print("Transcription returned None")
+            return {
+                "summary": "Transcription could not be completed. No result returned.",
+                "filename": f"summary_{abs(hash(video_url))}.txt",
+                "transcript": "",
+                "behavioral_scores": {},
+                "communication_analysis": {},
+                "enthusiasm_timestamps": [],
+                "behavioral_insights": {}
+            }
+        if hasattr(transcript, 'status') and str(transcript.status) == 'error':
+            error_detail = getattr(transcript, 'error', 'unknown error')
+            print(f"AssemblyAI transcription failed with status=error: {error_detail}")
+            return {
+                "summary": f"Transcription failed: {error_detail}",
+                "filename": f"summary_{abs(hash(video_url))}.txt",
+                "transcript": "",
+                "behavioral_scores": {},
+                "communication_analysis": {},
+                "enthusiasm_timestamps": [],
+                "behavioral_insights": {}
+            }
+        if not hasattr(transcript, 'text') or not transcript.text:
             print("Transcription failed or returned empty result")
             return {
                 "summary": "Transcription could not be completed. Only basic analysis is available.",
@@ -787,8 +810,7 @@ async def analyze_video_endpoint(video: VideoURL):
                     print(f"  video.video_url = {video.video_url[:80]}...")
                     print(f"  video (all fields) = {video.model_dump()}")
                     print(f"{'='*50}\n")
-                    print
-                    
+
                     answer_payload = {
                         'user_id': video.user_id,
                         'question_index': video.question_index,
@@ -850,7 +872,7 @@ def generate_personalized_questions_from_resume(resume_text: str, job_descriptio
         f"Return the questions as a JSON array of objects, each with a 'question' field. Example: [{{\"question\": \"...\"}}, ...]"
     )
     response = client.chat.completions.create(
-        model="gpt-5-mini",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are an expert technical interviewer."},
             {"role": "user", "content": prompt}
@@ -1060,7 +1082,7 @@ async def recruiter_chat(req: RecruiterChatRequest):
     try:
         system_prompt = "You are a concise assistant that helps recruiters. Keep replies under 120 words."
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": req.prompt},
@@ -1229,7 +1251,7 @@ async def get_invite_status(invite_code: str):
         invite = result.data
         
         invite_date = datetime.fromisoformat(invite['created_at'].replace('Z', '+00:00'))        
-        if invite_date < datetime.now() - timedelta(days=30) and invite['status'] == 'pending':
+        if invite_date < datetime.now(timezone.utc) - timedelta(days=30) and invite['status'] == 'pending':
             supabase.table('interview_invites').update({
                 'status': 'expired'
             }).eq('id', invite['id']).execute()
@@ -1254,7 +1276,7 @@ async def get_personalized_questions(request: GetPersonalizedQuestionsRequest):
         result = supabase.table("resume_questions") \
             .select("question_index, question_text, created_at") \
             .eq("user_id", user_id) \
-            .order("created_at", desc="desc") \
+            .order("created_at", desc=True) \
             .order("question_index", desc="asc") \
             .limit(3) \
             .execute()
