@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Skip auth check for login and signup pages
   if (
     request.nextUrl.pathname.includes('/login') ||
